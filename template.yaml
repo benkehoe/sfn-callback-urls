@@ -1,0 +1,52 @@
+Transform: 'AWS::Serverless-2016-10-31'
+Resources:
+  Api:
+    Type: AWS::ApiGateway::RestApi
+    Properties:
+      Name: "Step Functions callback url API"
+  
+  UrlsResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      ParentId: !GetAtt Api.RootResourceId
+      PathPart: "urls"
+      RestApiId: !Ref Api
+
+  CreateUrlMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      HttpMethod: POST
+      ResourceId: !Ref UrlsResource
+      RestApiId: !Ref Api
+      AuthorizationType: AWS_IAM
+      MethodResponses:
+        - StatusCode: "200"
+          # ResponseParameters:
+          #   method.response.header.Access-Control-Allow-Origin: true
+          #   method.response.header.Access-Control-Allow-Headers: true
+        - StatusCode: "500"  
+      Integration: {}
+
+  ApiDeployment1:
+    Type: AWS::ApiGateway::Deployment
+    DependsOn:
+      - GetItemMethod
+    Properties:
+      RestApiId: !Ref Api
+  
+  ApiStage:
+    Type: AWS::ApiGateway::Stage
+    Properties:
+      RestApiId: !Ref Api
+      StageName: v1
+      DeploymentId: !Ref ApiDeployment11
+  
+  CreateUrlFunction:
+    Type: 'AWS::Serverless::Function'
+    Properties:
+      CodeUri: ./create_url
+      Runtime: python3.6
+      Handler: create_url.handler
+      Environment:
+        API_ID: !Ref Api
+        STAGE_ID: !Ref ApiStage
