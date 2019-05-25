@@ -2,13 +2,17 @@ import pytest
 import uuid
 import datetime
 import json
+import os
+
+import boto3
+import aws_encryption_sdk
 
 from sfn_callback_urls.payload import (
     PayloadBuilder,
     validate_payload_schema, InvalidPayloadError,
     validate_payload_expiration, ExpiredPayloadError,
     encode_payload,
-    decode_payload
+    decode_payload, DecryptionUnsupportedError
 )
 from sfn_callback_urls.common import DISABLE_PARAMETERS_ENV_VAR_NAME, ParametersDisabledError
 
@@ -187,6 +191,45 @@ def test_basic_payload_coding():
 
     assert_dicts_equal(payload, decoded_payload)
 
-@pytest.mark.xfail
+@pytest.mark.skipif('KEY_ARN' not in os.environ, reason='Set KEY_ARN env var to test encryption')
 def test_encrypted_payload_coding():
-    raise NotImplementedError
+    key_arn = os.environ['KEY_ARN']
+    session = boto3.Session()
+    
+    mkp = aws_encryption_sdk.KMSMasterKeyProvider(
+        key_ids = [key_arn],
+        botocore_session = session._session
+    )
+
+    payload = {
+        'iss': 'issuer',
+        'iat': 0,
+        'tid': 'asdf',
+        'exp': 0,
+        'token': 'jkljkl',
+        'name': 'foo',
+        'act': 'success',
+        'data': {
+            'output': {}
+        },
+        'par': False,
+    }
+
+    validate_payload_schema(payload)
+
+    encoded_payload = encode_payload(payload, mkp)
+    assert encoded_payload.startswith('2-')
+    decoded_payload = decode_payload(encoded_payload, mkp)
+    validate_payload_schema(decoded_payload)
+    assert_dicts_equal(payload, decoded_payload)
+
+    encoded_payload = encode_payload(payload, None)
+    assert encoded_payload.startswith('1-')
+    decoded_payload = decode_payload(encoded_payload, mkp)
+    validate_payload_schema(decoded_payload)
+    assert_dicts_equal(payload, decoded_payload)
+
+    encoded_payload = encode_payload(payload, mkp)
+    assert encoded_payload.startswith('2-')
+    with pytest.raises(DecryptionUnsupportedError):
+        decoded_payload = decode_payload(encoded_payload, None)

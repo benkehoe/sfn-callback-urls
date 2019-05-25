@@ -151,7 +151,7 @@ def encode_payload(payload, master_key_provider):
     payload_string = json.dumps(payload).encode()
     
     if not master_key_provider:
-        return b'1-' + base64.urlsafe_b64encode(payload_string)
+        return '1-' + str(base64.urlsafe_b64encode(payload_string), 'ascii')
     else:
         try:
             ciphertext, encryptor_header = aws_encryption_sdk.encrypt(
@@ -162,7 +162,7 @@ def encode_payload(payload, master_key_provider):
             # unexpected
             raise 
 
-        return b'2-' + base64.urlsafe_b64encode(ciphertext)
+        return '2-' + str(base64.urlsafe_b64encode(ciphertext), 'ascii')
 
 def validate_payload_schema(payload):
     try:
@@ -178,7 +178,8 @@ def validate_payload_expiration(payload, timestamp=None):
             raise ExpiredPayloadError(f'Response expired on {exp.isoformat()}')
 
 def decode_payload(payload, master_key_provider):
-    parts = payload.split(b'-', 1)
+    assert isinstance(payload, str)
+    parts = payload.split('-', 1)
     if len(parts) != 2:
         raise InvalidPayloadError('Missing format id')
     
@@ -189,12 +190,12 @@ def decode_payload(payload, master_key_provider):
     except base64.binascii.Error as e:
         raise InvalidPayloadError(f'Base64 error ({str(e)})')
 
-    if version == b'1':
+    if version == '1':
         try:
             loaded_payload = json.loads(binary_payload)
         except json.JSONDecodeError as e:
             raise InvalidPayloadError(f'JSON error ({str(e)})')
-    elif version == b'2':
+    elif version == '2':
         if not master_key_provider:
             raise DecryptionUnsupportedError('No key found')
         try:

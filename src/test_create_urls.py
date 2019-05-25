@@ -287,7 +287,7 @@ def test_wrong_method():
     req = get_request()
     req['httpMethod'] = 'GET'
 
-    resp = create_urls.create_url_handler(req, None)
+    resp = create_urls.handler(req, None)
 
     assert resp['statusCode'] == 405
 
@@ -295,14 +295,14 @@ def test_wrong_content_type():
     req = get_request()
     req['headers']['Content-Type'] = 'text/plain'
 
-    resp = create_urls.create_url_handler(req, None)
+    resp = create_urls.handler(req, None)
 
     assert resp['statusCode'] == 415
 
 def test_empty_body():
     req = get_request()
     
-    resp = create_urls.create_url_handler(req, None)
+    resp = create_urls.handler(req, None)
 
     assert resp['statusCode'] == 400
 
@@ -311,7 +311,7 @@ def test_invalid_json():
 
     req['body'] = '{"foo"'
 
-    resp = create_urls.create_url_handler(req, None)
+    resp = create_urls.handler(req, None)
 
     assert resp['statusCode'] == 400
     
@@ -325,7 +325,7 @@ def test_invalid_event():
         'token': 1
     })
 
-    resp = create_urls.create_url_handler(req, None)
+    resp = create_urls.handler(req, None)
 
     assert resp['statusCode'] == 400
     
@@ -343,7 +343,7 @@ def test_basic():
         })
     )
 
-    resp = create_urls.create_url_handler(req, None)
+    resp = create_urls.handler(req, None)
     assert resp['statusCode'] == 200
 
     body = json.loads(resp['body'])

@@ -1,0 +1,40 @@
+{
+    // See https://go.microsoft.com/fwlink/?LinkId=733558
+    // for the documentation about the tasks.json format
+    // schema: https://code.visualstudio.com/docs/editor/tasks-appendix
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "build",
+            "type": "shell",
+            "command": "pipenv lock -r > src/requirements.txt && pipenv run sam build",
+            "problemMatcher": []
+        },
+        {
+            "label": "package",
+            "type": "shell",
+            "command": "pipenv run sam package --template-file .aws-sam/build/template.yaml --output-template-file .aws-sam/build/packaged-template.yaml --s3-bucket '${input:bucketName}'",
+            "problemMatcher": []
+        },
+        {
+            "label": "deploy",
+            "type": "shell",
+            "command": "pipenv run sam deploy --template-file .aws-sam/build/packaged-template.yaml --capabilities CAPABILITY_IAM --stack-name ${input:stackName}",
+            "problemMatcher": []
+        }
+    ],
+    "inputs": [
+        {
+            "id": "bucketName",
+            "type": "promptString",
+            "description": "The bucket to upload artifacts to",
+            "default": ""
+        },
+        {
+            "id": "stackName",
+            "type": "promptString",
+            "description": "The stack to deploy",
+            "default": "${workspaceFolderBasename}"
+        }
+    ]
+}

@@ -47,7 +47,7 @@ def format_output(output, parameters):
             raise OutputFormattingError(f'Formatting the output with the parameters failed ({e})')
     return output
 
-def callback_handler(event, context):
+def handler(event, context):
     print(f'Received event: {event}')
 
     timestamp = datetime.datetime.now()
@@ -137,6 +137,8 @@ def callback_handler(event, context):
                 send_log_event(log_event)
                 return response
             raise
+
+        print(f'Sending response: {json.dumps(response)}')
 
         send_log_event(log_event)
 

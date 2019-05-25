@@ -20,7 +20,7 @@ def get_url(action_name, action_type, payload,
         (PAYLOAD_QUERY_PARAM, payload)
     ])
 
-    url_template = 'https://{api_id}.{region}.execute-api.amazonaws.com/{stage_id}/{path}?{query}'
+    url_template = 'https://{api_id}.execute-api.{region}.amazonaws.com/{stage_id}/{path}?{query}'
 
     return url_template.format(
         api_id=api_id,
@@ -42,7 +42,7 @@ def load_from_request(event):
     payload = query_parameters[PAYLOAD_QUERY_PARAM]
 
     parameters = {}
-    for k, v in query_parameters:
+    for k, v in query_parameters.items():
         if k not in [ACTION_NAME_QUERY_PARAM, ACTION_TYPE_QUERY_PARAM, PAYLOAD_QUERY_PARAM]:
             parameters[k] = v
     

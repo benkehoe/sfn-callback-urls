@@ -1,0 +1,53 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Outputs:
+  StateMachine:
+    Value: !Ref StateMachine
+  Queue:
+    Value: !Ref TaskQueue
+Resources:
+  TaskQueue:
+    Type: AWS::SQS::Queue
+    Properties: {}
+  
+  StateMachineRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument: 
+        Version: "2012-10-17"
+        Statement: 
+          - Effect: "Allow"
+            Principal: 
+              Service: "states.amazonaws.com"
+            Action: "sts:AssumeRole"
+      Policies:
+        - PolicyName: QueuePut
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: sqs:SendMessage
+                Resource: !GetAtt TaskQueue.Arn
+  
+  StateMachine:
+    Type: AWS::StepFunctions::StateMachine
+    Properties:
+      RoleArn: !GetAtt StateMachineRole.Arn
+      DefinitionString: !Sub |
+        {
+          "StartAt": "TokenState",
+          "Version": "1.0",
+          "States": {
+            "TokenState": {
+              "Type": "Task",
+              "Resource": "arn:aws:states:::sqs:sendMessage.waitForTaskToken",
+              "Parameters": {
+                "QueueUrl": "${TaskQueue}",
+                "MessageBody": {
+                    "Input.$": "$",
+                    "TaskToken.$": "$$.Task.Token"
+                }
+              },
+              "End": true
+            }
+          }
+        }

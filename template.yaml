@@ -1,36 +1,110 @@
 Transform: 'AWS::Serverless-2016-10-31'
+Outputs:
+  Api:
+    Value: !Sub "https://${Api}.execute-api.${AWS::Region}.amazonaws.com/${ApiStage}"
 Resources:
   Api:
     Type: AWS::ApiGateway::RestApi
     Properties:
-      Name: "Step Functions callback url API"
-  
-  UrlsResource:
+      EndpointConfiguration:
+        Types:
+        - REGIONAL
+
+  CreateUrlResource:
     Type: AWS::ApiGateway::Resource
     Properties:
       ParentId: !GetAtt Api.RootResourceId
-      PathPart: "urls"
+      PathPart: urls
       RestApiId: !Ref Api
 
   CreateUrlMethod:
     Type: AWS::ApiGateway::Method
     Properties:
       HttpMethod: POST
-      ResourceId: !Ref UrlsResource
+      ResourceId: !Ref CreateUrlResource
       RestApiId: !Ref Api
       AuthorizationType: AWS_IAM
-      MethodResponses:
-        - StatusCode: "200"
-          # ResponseParameters:
-          #   method.response.header.Access-Control-Allow-Origin: true
-          #   method.response.header.Access-Control-Allow-Headers: true
-        - StatusCode: "500"  
-      Integration: {}
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:${CreateUrlFunction}/invocations"
+  
+  CreateUrlInvokePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref CreateUrlFunction
+      Action: "lambda:InvokeFunction"
+      Principal: apigateway.amazonaws.com
 
-  ApiDeployment1:
+  HandleCallbackResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      ParentId: !GetAtt Api.RootResourceId
+      PathPart: respond
+      RestApiId: !Ref Api
+
+  HandleCallbackMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      HttpMethod: GET
+      ResourceId: !Ref HandleCallbackResource
+      RestApiId: !Ref Api
+      AuthorizationType: NONE
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:${HandleCallbackFunction}/invocations"
+
+  HandleCallbackInvokePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref HandleCallbackFunction
+      Action: "lambda:InvokeFunction"
+      Principal: apigateway.amazonaws.com
+
+  CreateUrlFunction:
+    Type: 'AWS::Serverless::Function'
+    Properties:
+      CodeUri: ./src
+      Runtime: python3.6
+      Handler: create_urls.handler
+      # Events:
+      #   Api:
+      #     Type: Api
+      #     Properties:
+      #       RestApiId: !Ref Api
+      #       Path: "/urls"
+      #       Method: POST
+  
+  HandleCallbackFunction:
+    Type: 'AWS::Serverless::Function'
+    Properties:
+      CodeUri: ./src
+      Runtime: python3.6
+      Handler: handle_callback.handler
+      Policies:
+        - Statement:
+            Effect: Allow  
+            Action:
+              - states:SendTaskSuccess
+              - states:SendTaskFailure
+              - states:SendTaskHeartbeat
+            Resource: "*"
+      # Events:
+      #   Api:
+      #     Type: Api
+      #     Properties:
+      #       RestApiId: !Ref Api
+      #       Path: "/respond"
+      #       Method: GET
+      #       Auth:
+      #         Authorizer: NONE
+  
+  ApiDeployment:
     Type: AWS::ApiGateway::Deployment
     DependsOn:
-      - GetItemMethod
+      - CreateUrlMethod
+      - HandleCallbackMethod
     Properties:
       RestApiId: !Ref Api
   
@@ -39,14 +113,4 @@ Resources:
     Properties:
       RestApiId: !Ref Api
       StageName: v1
-      DeploymentId: !Ref ApiDeployment11
-  
-  CreateUrlFunction:
-    Type: 'AWS::Serverless::Function'
-    Properties:
-      CodeUri: ./create_url
-      Runtime: python3.6
-      Handler: create_url.handler
-      Environment:
-        API_ID: !Ref Api
-        STAGE_ID: !Ref ApiStage
+      DeploymentId: !Ref ApiDeployment

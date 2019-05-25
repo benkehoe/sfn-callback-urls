@@ -150,7 +150,7 @@ def get_header(event, name):
             return event['headers'][key]
     return None
 
-def create_url_handler(request, context):
+def handler(request, context):
     print(f'Received request: {request}')
 
     if request['httpMethod'] != 'POST':
