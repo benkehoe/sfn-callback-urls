@@ -7,9 +7,10 @@ name = "pypi"
 
 [packages]
 
-pyjwt = ">=1.0.1"
 python-dateutil = "*"
 "boto3" = "*"
+aws-encryption-sdk = "*"
+jsonschema = ">=3.0.1"
 
 
 [dev-packages]
@@ -18,6 +19,8 @@ pylint = "*"
 cfn-lint = "*"
 pytest = "*"
 "requests-aws4auth" = "*"
+rope = "*"
+aws-encryption-sdk-cli = "*"
 
 
 [requires]
