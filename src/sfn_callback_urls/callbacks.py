@@ -14,6 +14,7 @@
 
 import urllib
 
+from .common import RequestError
 from .payload import InvalidPayloadError
 
 ACTION_NAME_QUERY_PARAM = 'action'
@@ -61,4 +62,22 @@ def load_from_request(event):
             parameters[k] = v
     
     return action_name, action_type, payload, parameters
+
+class OutputFormattingError(RequestError):
+    pass
+
+def format_output(output, parameters):
+    if isinstance(output, dict):
+        for key in output:
+            output[key] = format_output(output[key], parameters)
+    elif isinstance(output, list):
+        for i in range(len(output)):
+            output[i] = format_output(output[i], parameters)
+    elif isinstance(output, str):
+        try:
+            output = output.format(**parameters)
+        except (IndexError, KeyError) as e:
+            raise OutputFormattingError(f'Formatting the output with the parameters failed ({e})')
+    return output
+
 

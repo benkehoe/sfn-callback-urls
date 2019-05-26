@@ -29,7 +29,13 @@ class InvalidPayloadError(RequestError):
 class ExpiredPayloadError(RequestError):
     pass
 
+class EncryptionError(RequestError):
+    pass
+
 class DecryptionUnsupportedError(RequestError):
+    pass
+
+class EncryptionRequiredError(RequestError):
     pass
 
 PAYLOAD_SKELETON = {
@@ -153,7 +159,6 @@ class PayloadBuilder:
         if self.enable_output_parameters:
             if force_disable_parameters:
                 log_event['enable_parameter_conflict'] = True
-                print('Request asked for parameters, but they are disabled', file=sys.stderr)
                 raise ParametersDisabledError('Parameters are disabled')
             else:
                 log_event['parameters_enabled'] = True
@@ -172,6 +177,8 @@ def encode_payload(payload, master_key_provider):
                 source=payload_string,
                 key_provider=master_key_provider
             )
+        except aws_encryption_sdk.exceptions.GenerateKeyError as e:
+            raise EncryptionError(f'Failed to create DEK; check your key policy ({str(e)})')
         except aws_encryption_sdk.exceptions.AWSEncryptionSDKClientError as e:
             # unexpected
             raise 
@@ -205,6 +212,8 @@ def decode_payload(payload, master_key_provider):
         raise InvalidPayloadError(f'Base64 error ({str(e)})')
 
     if version == '1':
+        if master_key_provider:
+            raise EncryptionRequiredError('Only encrypted payloads are supported')
         try:
             loaded_payload = json.loads(binary_payload)
         except json.JSONDecodeError as e:

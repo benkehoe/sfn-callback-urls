@@ -20,46 +20,33 @@ import uuid
 import sys
 import traceback
 from collections import namedtuple
+import time
 
 import boto3
 import botocore.exceptions
 import aws_encryption_sdk
 import jsonschema
 
-from sfn_callback_urls.callbacks import load_from_request
+from sfn_callback_urls.callbacks import load_from_request, format_output
 from sfn_callback_urls.payload import decode_payload, validate_payload_schema, validate_payload_expiration
-from sfn_callback_urls.common import send_log_event, get_force_disable_parameters, RequestError
+from sfn_callback_urls.common import send_log_event, get_force_disable_parameters, RequestError, BaseError
 
 class ActionMismatchedError(RequestError):
-    pass
-
-class OutputFormattingError(RequestError):
     pass
 
 class ParametersDisabledError(RequestError):
     pass
 
+class StepFunctionsError(BaseError):
+    TYPE = 'StepFunctionsError'
+
 BOTO3_SESSION = boto3.Session()
 MASTER_KEY_PROVIDER = None
-if 'KEY_ARN' in os.environ:
+if 'KEY_ID' in os.environ:
     MASTER_KEY_PROVIDER = aws_encryption_sdk.KMSMasterKeyProvider(
-        key_ids = [os.environ['KEY_ARN']],
+        key_ids = [os.environ['KEY_ID']],
         botocore_session = BOTO3_SESSION._session
     )
-
-def format_output(output, parameters):
-    if isinstance(output, dict):
-        for key in output:
-            output[key] = format_output(output[key], parameters)
-    elif isinstance(output, list):
-        for i in range(len(output)):
-            output[i] = format_output(output[i], parameters)
-    elif isinstance(output, str):
-        try:
-            output = output.format(**parameters)
-        except (IndexError, KeyError) as e:
-            raise OutputFormattingError(f'Formatting the output with the parameters failed ({e})')
-    return output
 
 def handler(event, context):
     print(f'Received event: {event}')
@@ -80,7 +67,10 @@ def handler(event, context):
             parameters
         ) = load_from_request(event)
 
+        decode_start = time.perf_counter()
         payload = decode_payload(encoded_payload, MASTER_KEY_PROVIDER)
+        decode_finish = time.perf_counter()
+        log_event['decode_time'] = (decode_finish - decode_start)
         
         action_name_in_payload = payload['name']
         if action_name_from_url and action_name_from_url != action_name_in_payload:
@@ -103,12 +93,11 @@ def handler(event, context):
         force_disable_parameters = get_force_disable_parameters()
         use_parameters = payload.get('par', False)
         if use_parameters and force_disable_parameters:
-            print('Request asked for parameters, but they are disabled', file=sys.stderr)
             raise ParametersDisabledError('Parameters are disabled')
         
         action_data = payload.get('data', {})
         
-        client = boto3.client('stepfunctions')
+        client = BOTO3_SESSION.client('stepfunctions')
 
         method = f'send_task_{action_type}'
 
@@ -127,7 +116,10 @@ def handler(event, context):
                     method_params[key] = action_data[key]
         
         try:
+            sfn_call_start = time.perf_counter()
             sfn_response = getattr(client, method)(**method_params)
+            sfn_call_finish = time.perf_counter()
+            log_event['sfn_call_time'] = (sfn_call_finish-sfn_call_start)
         except botocore.exceptions.ClientError as e:
             error_code = e.response['Error']['Code']
             error_msg = e.response['Error']['Message']
@@ -139,17 +131,7 @@ def handler(event, context):
 
             ]
             if error_code in errors:
-                response = {
-                    'error': error_code,
-                    'message': error_msg,
-                }
-                log_event['error'] = {
-                    'type': 'StepFunctionsError',
-                    'error': error_code,
-                    'message': error_msg,
-                }
-                send_log_event(log_event)
-                return response
+                raise StepFunctionsError(error_msg)
             raise
 
         print(f'Sending response: {json.dumps(response)}')
@@ -163,13 +145,13 @@ def handler(event, context):
             },
             'body': json.dumps(response)
         }
-    except RequestError as e:
+    except BaseError as e:
         response = {
             'error': e.code(),
             'message': e.message(),
         }
         log_event['error'] = {
-            'type': 'RequestError',
+            'type': e.TYPE,
             'error': e.code(),
             'message': e.message(),
         }

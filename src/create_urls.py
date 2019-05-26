@@ -19,6 +19,7 @@ import os
 import uuid
 import sys
 import traceback
+from collections import namedtuple
 
 import dateutil.parser
 import boto3
@@ -152,9 +153,9 @@ CREATE_URL_EVENT_SCHEMA = {
 
 BOTO3_SESSION = boto3.Session()
 MASTER_KEY_PROVIDER = None
-if 'KEY_ARN' in os.environ:
+if 'KEY_ID' in os.environ:
     MASTER_KEY_PROVIDER = aws_encryption_sdk.KMSMasterKeyProvider(
-        key_ids = [os.environ['KEY_ARN']],
+        key_ids = [os.environ['KEY_ID']],
         botocore_session = BOTO3_SESSION._session
     )
 
@@ -164,10 +165,37 @@ def get_header(event, name):
             return event['headers'][key]
     return None
 
-def handler(request, context):
-    print(f'Received request: {request}')
+DefaultApiInfo = namedtuple('DefaultApiInfo', ['region', 'api_id', 'stage'])
 
-    if request['httpMethod'] != 'POST':
+def direct_handler(event, context):
+    default_api_info = DefaultApiInfo(
+        region=BOTO3_SESSION.region_name,
+        api_id=os.environ['API_ID'],
+        stage=os.environ['STAGE']
+    )
+
+    def response_formatter(statusCode, response):
+        return response
+    
+    return process_event(event, context, default_api_info, response_formatter)
+
+def api_handler(event, context):
+    default_api_info = DefaultApiInfo(
+        region=BOTO3_SESSION.region_name,
+        api_id=event['requestContext']['apiId'],
+        stage=event['requestContext']['stage']
+    )
+
+    def response_formatter(statusCode, response):
+        return {
+            'statusCode': statusCode,
+            'headers': {
+                'Content-Type': 'application/json',
+            },
+            'body': json.dumps(response)
+        }
+
+    if event['httpMethod'] != 'POST':
         return {
             'statusCode': 405,
             'headers': {
@@ -175,7 +203,7 @@ def handler(request, context):
             }
         }
     
-    if get_header(request, 'content-type') != 'application/json':
+    if get_header(event, 'content-type') != 'application/json':
         return {
             'statusCode': 415,
             'headers': {
@@ -184,7 +212,7 @@ def handler(request, context):
         }
     
     try:
-        event = json.loads(request['body'])
+        event = json.loads(event['body'])
     except json.JSONDecodeError as e:
         return {
             'statusCode': 400,
@@ -196,20 +224,19 @@ def handler(request, context):
                 'message': f'{str(e)}',
             })
         }
+    
+    return process_event(event, context, default_api_info, response_formatter)
 
+def process_event(event, context, default_api_info, response_formatter):
+    print(f'Received event: {event}')
+        
     try:
         jsonschema.validate(event, CREATE_URL_EVENT_SCHEMA)
     except jsonschema.ValidationError as e:
-        return {
-                'statusCode': 400,
-                'headers': {
-                    'Content-Type': 'application/json',
-                },
-                'body': json.dumps({
+        return response_formatter(400,{
                     'error': 'InvalidJSON',
                     'message': f'{str(e)}',
                 })
-            }
 
     transaction_id = uuid.uuid4().hex
     timestamp = datetime.datetime.now()
@@ -221,23 +248,30 @@ def handler(request, context):
     }
 
     try:
-        api_spec = event.get('api', {})
-        region = api_spec.get('region') or BOTO3_SESSION.region_name
-        api_id = api_spec.get('api_id', request['requestContext']['apiId'])
-        stage = api_spec.get('stage', request['requestContext']['stage'])
+        if 'api' in event:
+            api_spec = event['api']
+            region = api_spec.get('region', default_api_info.region)
+            api_id = api_spec.get('api_id')
+            stage = api_spec.get('stage')
+
+            missing = []
+            if not api_id:
+                missing.append('API id')
+            if not stage:
+                missing.append('stage')
+            if missing:
+                message = 'Missing ' + ' and '.join(missing)
+                raise MissingApiParametersError(message)
+        else:
+            region = default_api_info.region
+            api_id = default_api_info.api_id
+            stage = default_api_info.stage
+        
         log_event.update({
             'api_id': api_id,
             'stage': stage,
             'region': region,
         })
-        missing = []
-        if not api_id:
-            missing.append('API id')
-        if not stage:
-            missing.append('stage')
-        if missing:
-            message = 'Missing ' + ' and '.join(missing)
-            raise MissingApiParametersError(message)
 
         response = {
             'transaction_id': transaction_id,
@@ -290,13 +324,7 @@ def handler(request, context):
 
         send_log_event(log_event)
 
-        return {
-            'statusCode': 200,
-            'headers': {
-                'Content-Type': 'application/json',
-            },
-            'body': json.dumps(response)
-        }
+        return response_formatter(200, response)
     except RequestError as e:
         response = {
             'transaction_id': transaction_id,
@@ -309,13 +337,7 @@ def handler(request, context):
             'message': e.message(),
         }
         send_log_event(log_event)
-        return {
-            'statusCode': 400,
-            'headers': {
-                'Content-Type': 'application/json',
-            },
-            'body': json.dumps(response)
-        }
+        return response_formatter(400, response)
     except Exception as e:
         traceback.print_exc()
         error_class_name = type(e).__module__ + '.' + type(e).__name__
@@ -329,10 +351,4 @@ def handler(request, context):
             'message': str(e),
         }
         send_log_event(log_event)
-        return {
-            'statusCode': 500,
-            'headers': {
-                'Content-Type': 'application/json',
-            },
-            'body': json.dumps(response)
-        }
+        return response_formatter(500, response)

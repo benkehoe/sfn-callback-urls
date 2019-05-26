@@ -16,7 +16,9 @@ import os
 import sys
 import json
 
-class RequestError(Exception):
+class BaseError(Exception):
+    TYPE = 'GenericError'
+    
     def __init__(self, message):
         self._message = message
 
@@ -28,6 +30,9 @@ class RequestError(Exception):
 
     def __str__(self):
         return f'{self.code()}:{self.message()}'
+
+class RequestError(BaseError):
+    TYPE = 'RequestError'
 
 class ParametersDisabledError(RequestError):
     pass

@@ -171,6 +171,8 @@ def run(api_url, test_stack_name, session):
     )
 
     print(f'Response status: {response.status_code}')
+    if response.status_code != 200:
+        print(f'Response headers: {response.headers}')
     print(f'Response body: {json.dumps(response.json(), indent=2)}')
 
     response = response.json()
@@ -184,6 +186,8 @@ def run(api_url, test_stack_name, session):
     response = requests.get(good_url)
 
     print(f'Response status: {response.status_code}')
+    if response.status_code != 200:
+        print(f'Response headers: {response.headers}')
     print(f'Response body: {json.dumps(response.json(), indent=2)}')
 
     time.sleep(1)
@@ -194,6 +198,7 @@ def run(api_url, test_stack_name, session):
         executionArn=execution_arn
     )
 
+    print(f'Status: {response["status"]}')
     print(f'Response: {response}')
 
     print('Deleting queue message')

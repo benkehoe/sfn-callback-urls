@@ -346,7 +346,7 @@ def test_invalid_event():
     body = json.loads(resp['body'])
     assert body['error'] == 'InvalidJSON'
 
-def test_basic():
+def test_basic_request():
     req = get_request()
 
     req['body'] = json.dumps(
@@ -363,3 +363,16 @@ def test_basic():
     body = json.loads(resp['body'])
 
     assert len(body['urls']) == 3
+
+def test_basic_event(monkeypatch):
+    monkeypatch.setenv('API_ID', 'gy415nuibc')
+    monkeypatch.setenv('STAGE', 'testStage')
+    
+    event = get_event(actions={
+        'foo': get_success({'spam': 'eggs'}),
+        'bar': get_failure(),
+        'baz': get_heartbeat()
+    })
+
+    resp = create_urls.handler(event, None)
+    assert len(resp['urls']) == 3

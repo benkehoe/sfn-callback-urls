@@ -26,7 +26,7 @@ from sfn_callback_urls.payload import (
     validate_payload_schema, InvalidPayloadError,
     validate_payload_expiration, ExpiredPayloadError,
     encode_payload,
-    decode_payload, DecryptionUnsupportedError
+    decode_payload, DecryptionUnsupportedError, EncryptionRequiredError
 )
 from sfn_callback_urls.common import DISABLE_PARAMETERS_ENV_VAR_NAME, ParametersDisabledError
 
@@ -168,10 +168,6 @@ def test_validate_payload_basic():
     with pytest.raises(InvalidPayloadError):
         validate_payload_schema(payload)
 
-@pytest.mark.xfail
-def test_extended_schema_validation():
-    raise NotImplementedError
-
 """
 encode decode
 - e+d w/o mkp
@@ -205,13 +201,13 @@ def test_basic_payload_coding():
 
     assert_dicts_equal(payload, decoded_payload)
 
-@pytest.mark.skipif('KEY_ARN' not in os.environ, reason='Set KEY_ARN env var to test encryption')
+@pytest.mark.skipif('KEY_ID' not in os.environ, reason='Set KEY_ID env var to test encryption')
 def test_encrypted_payload_coding():
-    key_arn = os.environ['KEY_ARN']
+    key_id = os.environ['KEY_ID']
     session = boto3.Session()
     
     mkp = aws_encryption_sdk.KMSMasterKeyProvider(
-        key_ids = [key_arn],
+        key_ids = [key_id],
         botocore_session = session._session
     )
 
@@ -239,9 +235,8 @@ def test_encrypted_payload_coding():
 
     encoded_payload = encode_payload(payload, None)
     assert encoded_payload.startswith('1-')
-    decoded_payload = decode_payload(encoded_payload, mkp)
-    validate_payload_schema(decoded_payload)
-    assert_dicts_equal(payload, decoded_payload)
+    with pytest.raises(EncryptionRequiredError):
+        decoded_payload = decode_payload(encoded_payload, mkp)
 
     encoded_payload = encode_payload(payload, mkp)
     assert encoded_payload.startswith('2-')

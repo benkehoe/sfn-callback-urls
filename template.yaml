@@ -13,10 +13,47 @@
 # limitations under the License.
 
 Transform: 'AWS::Serverless-2016-10-31'
+Parameters:
+  UseEncryption:
+    Description: Enable or disable encryption for callback payloads
+    Type: String
+    AllowedValues:
+      - "true"
+      - "false"
+    Default: "true"
+  EncryptionKeyArn:
+    Description: If encryption is enabled, set this to use your own KMS key, or set to NONE to create one
+    Type: String
+    Default: 'NONE'
+Conditions:
+  EncryptionEnabled:
+    Fn::Equals: [ !Ref UseEncryption, "true" ]
+  CreateKey:
+    Fn::And:
+      - Fn::Equals: [ !Ref UseEncryption, "true" ]
+      - Fn::Equals: [ !Ref EncryptionKeyArn, "NONE" ]
 Outputs:
   Api:
     Value: !Sub "https://${Api}.execute-api.${AWS::Region}.amazonaws.com/${ApiStage}"
+  Function:
+    Value: !Ref CreateUrls
+  Policy:
+    Value: !Ref CreateUrlsPolicy
 Resources:
+  CreateUrlsPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      Description: Permission to call the API and the function directly
+      PolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Action: execute-api:Invoke
+            Resource: !Sub arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${Api}/${ApiStage}/*
+          - Effect: Allow
+            Action: lambda:Invoke
+            Resource: !GetAtt CreateUrls.Arn
+
   Api:
     Type: AWS::ApiGateway::RestApi
     Properties:
@@ -24,101 +61,206 @@ Resources:
         Types:
         - REGIONAL
 
-  CreateUrlResource:
+  CreateUrlsResource:
     Type: AWS::ApiGateway::Resource
     Properties:
       ParentId: !GetAtt Api.RootResourceId
       PathPart: urls
       RestApiId: !Ref Api
 
-  CreateUrlMethod:
+  CreateUrlsMethod:
     Type: AWS::ApiGateway::Method
     Properties:
       HttpMethod: POST
-      ResourceId: !Ref CreateUrlResource
+      ResourceId: !Ref CreateUrlsResource
       RestApiId: !Ref Api
       AuthorizationType: AWS_IAM
       Integration:
         Type: AWS_PROXY
         IntegrationHttpMethod: POST
-        Uri: !Sub "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:${CreateUrlFunction}/invocations"
+        Uri: !Sub "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:${CreateUrlsForApi}/invocations"
   
-  CreateUrlInvokePermission:
+  CreateUrlsInvokePermission:
     Type: AWS::Lambda::Permission
     Properties:
-      FunctionName: !Ref CreateUrlFunction
+      FunctionName: !Ref CreateUrlsForApi
       Action: "lambda:InvokeFunction"
       Principal: apigateway.amazonaws.com
 
-  HandleCallbackResource:
+  ProcessCallbackResource:
     Type: AWS::ApiGateway::Resource
     Properties:
       ParentId: !GetAtt Api.RootResourceId
       PathPart: respond
       RestApiId: !Ref Api
 
-  HandleCallbackMethod:
+  ProcessCallbackGetMethod:
     Type: AWS::ApiGateway::Method
     Properties:
       HttpMethod: GET
-      ResourceId: !Ref HandleCallbackResource
+      ResourceId: !Ref ProcessCallbackResource
       RestApiId: !Ref Api
       AuthorizationType: NONE
       Integration:
         Type: AWS_PROXY
         IntegrationHttpMethod: POST
-        Uri: !Sub "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:${HandleCallbackFunction}/invocations"
+        Uri: !Sub "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:${ProcessCallbackFunction}/invocations"
 
-  HandleCallbackInvokePermission:
+  ProcessCallbackPostMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      HttpMethod: POST
+      ResourceId: !Ref ProcessCallbackResource
+      RestApiId: !Ref Api
+      AuthorizationType: NONE
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:${ProcessCallbackFunction}/invocations"
+
+  ProcessCallbackInvokePermission:
     Type: AWS::Lambda::Permission
     Properties:
-      FunctionName: !Ref HandleCallbackFunction
+      FunctionName: !Ref ProcessCallbackFunction
       Action: "lambda:InvokeFunction"
       Principal: apigateway.amazonaws.com
 
-  CreateUrlFunction:
+  CreateUrlsRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument: |
+        {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "lambda.amazonaws.com"
+              },
+              "Action": "sts:AssumeRole"
+            }
+          ]
+        }
+
+  CreateUrlsForApi:
     Type: 'AWS::Serverless::Function'
     Properties:
       CodeUri: ./src
       Runtime: python3.6
-      Handler: create_urls.handler
-      # Events:
-      #   Api:
-      #     Type: Api
-      #     Properties:
-      #       RestApiId: !Ref Api
-      #       Path: "/urls"
-      #       Method: POST
+      Handler: create_urls.api_handler
+      Role: !GetAtt CreateUrlsRole.Arn
+      MemorySize: 1024
+      Environment:
+        Variables:
+          KEY_ID: 
+            "Fn::If":
+              - EncryptionEnabled
+              - "Fn::If":
+                  - CreateKey
+                  - !Ref EncryptionKey
+                  - !Ref EncryptionKeyArn
+              - !Ref AWS::NoValue
   
-  HandleCallbackFunction:
+  CreateUrls:
     Type: 'AWS::Serverless::Function'
     Properties:
       CodeUri: ./src
       Runtime: python3.6
-      Handler: handle_callback.handler
-      Policies:
-        - Statement:
-            Effect: Allow  
+      Handler: create_urls.direct_handler
+      Role: !GetAtt CreateUrlsRole.Arn
+      MemorySize: 1024
+      Environment:
+        Variables:
+          API_ID: !Ref Api
+          STAGE: !Ref ApiStage
+          KEY_ID: 
+            "Fn::If":
+              - EncryptionEnabled
+              - "Fn::If":
+                  - CreateKey
+                  - !Ref EncryptionKey
+                  - !Ref EncryptionKeyArn
+              - !Ref AWS::NoValue
+  
+  ProcessCallbackRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument: |
+        {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "lambda.amazonaws.com"
+              },
+              "Action": "sts:AssumeRole"
+            }
+          ]
+        }
+
+  ProcessCallbackPolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      Roles:
+      - !Ref ProcessCallbackRole
+      PolicyName: AccessSfn
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement: 
+          - Effect: Allow
             Action:
-              - states:SendTaskSuccess
-              - states:SendTaskFailure
-              - states:SendTaskHeartbeat
+              - "states:SendTaskSuccess"
+              - "states:SendTaskFailure"
+              - "states:SendTaskHeartbeat"
             Resource: "*"
-      # Events:
-      #   Api:
-      #     Type: Api
-      #     Properties:
-      #       RestApiId: !Ref Api
-      #       Path: "/respond"
-      #       Method: GET
-      #       Auth:
-      #         Authorizer: NONE
+
+  ProcessCallbackFunction:
+    Type: 'AWS::Serverless::Function'
+    Properties:
+      CodeUri: ./src
+      Runtime: python3.6
+      Handler: process_callback.handler
+      Role: !GetAtt ProcessCallbackRole.Arn
+      MemorySize: 1024
+      Timeout: 15
+      Environment:
+        Variables:
+          KEY_ID:
+            "Fn::If":
+              - EncryptionEnabled
+              - "Fn::If":
+                  - CreateKey
+                  - !Ref EncryptionKey
+                  - !Ref EncryptionKeyArn
+              - !Ref AWS::NoValue
   
+  LogsPolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      Roles:
+      - !Ref CreateUrlsRole
+      - !Ref ProcessCallbackRole
+      PolicyName: LambdaLogging
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement: 
+          - Effect: Allow
+            Action:
+              - "logs:CreateLogGroup"
+            Resource: !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:*"
+          - Effect: Allow
+            Action:
+              - "logs:CreateLogStream"
+              - "logs:PutLogEvents"
+            Resource: !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/*:*"
+
   ApiDeployment:
     Type: AWS::ApiGateway::Deployment
     DependsOn:
-      - CreateUrlMethod
-      - HandleCallbackMethod
+      - CreateUrlsMethod
+      - ProcessCallbackGetMethod
+      - ProcessCallbackPostMethod
     Properties:
       RestApiId: !Ref Api
   
@@ -128,3 +270,41 @@ Resources:
       RestApiId: !Ref Api
       StageName: v1
       DeploymentId: !Ref ApiDeployment
+  
+  EncryptionKey:
+    Type: AWS::KMS::Key
+    Condition: CreateKey
+    Properties:
+      KeyPolicy: !Sub |
+        {
+          "Version": "2012-10-17",
+          "Id": "key-default-1",
+          "Statement": [{
+            "Sid": "Enable IAM User Permissions",
+            "Effect": "Allow",
+            "Principal": {"AWS": "arn:aws:iam::${AWS::AccountId}:root"},
+            "Action": "kms:*",
+            "Resource": "*"
+          }]
+        }
+  
+  EncryptionKeyPolicy:
+    Type: AWS::IAM::Policy
+    Condition: EncryptionEnabled
+    Properties:
+      Roles:
+      - !Ref CreateUrlsRole
+      - !Ref ProcessCallbackRole
+      PolicyName: AccessEncryptionKey
+      PolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Action:
+              - "kms:GenerateDataKey"
+              - "kms:Decrypt"
+            Resource:
+              "Fn::If":
+                - CreateKey
+                - !GetAtt EncryptionKey.Arn
+                - !Ref EncryptionKeyArn
