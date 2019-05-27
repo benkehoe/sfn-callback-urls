@@ -32,13 +32,6 @@ Parameters:
       - "true"
       - "false"
     Default: "true"
-  VerboseLogging:
-    Description: Enable verbose logging
-    Type: String
-    AllowedValues:
-      - "true"
-      - "false"
-    Default: "false"
 Conditions:
   EncryptionEnabled:
     Fn::Equals: [ !Ref UseEncryption, "true" ]
@@ -191,7 +184,7 @@ Resources:
       Environment:
         Variables:
           DISABLE_OUTPUT_PARAMETERS: !Ref DisableOutputParameters
-          VERBOSE: !Ref Verbose
+          VERBOSE: "false"
           KEY_ID: 
             "Fn::If":
               - EncryptionEnabled
@@ -212,7 +205,7 @@ Resources:
       Environment:
         Variables:
           DISABLE_OUTPUT_PARAMETERS: !Ref DisableOutputParameters
-          VERBOSE: !Ref Verbose
+          VERBOSE: "false"
           API_ID: !Ref Api
           STAGE: !Ref ApiStage
           KEY_ID: 
@@ -288,7 +281,7 @@ Resources:
       Environment:
         Variables:
           DISABLE_OUTPUT_PARAMETERS: !Ref DisableOutputParameters
-          VERBOSE: !Ref Verbose
+          VERBOSE: "false"
           KEY_ID:
             "Fn::If":
               - EncryptionEnabled

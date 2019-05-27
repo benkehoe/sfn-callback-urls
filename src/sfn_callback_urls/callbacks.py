@@ -125,7 +125,7 @@ def format_response(status_code, response, request, response_spec, parameters, l
         if status_code == 200:
             message = "Response accepted!"
         else:
-            message = "Response rejected"
+            message = "Response rejected!"
         html_body = HTML_TEMPLATE.format(
             message = message,
             json=json.dumps(response, indent=2)

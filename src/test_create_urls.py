@@ -151,14 +151,14 @@ get_success = lambda output: {
     'output': output,
 }
 
-def get_failure(error=None, reason=None):
+def get_failure(error=None, cause=None):
     action = {
         'type': 'failure'
     }
     if error:
         action['error'] = error
-    if reason:
-        action['reason'] = reason
+    if cause:
+        action['cause'] = cause
     return action
 
 get_heartbeat = lambda: { 'type': 'heartbeat' }
@@ -201,7 +201,7 @@ def test_action_schema():
         'type': 'success'
     })
 
-    assert_bad({
+    assert_good({
         'type': 'success',
         'output': 'foo'
     })
@@ -227,12 +227,12 @@ def test_action_schema():
 
     assert_bad({
         'type': 'failure',
-        'reason': {}
+        'cause': {}
     })
     
     assert_good({
         'type': 'failure',
-        'reason': 'foo'
+        'cause': 'foo'
     })
 
     assert_good({

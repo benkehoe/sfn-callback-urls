@@ -71,7 +71,7 @@ schema = {
                             "error": {
                                 "type": "string"
                             },
-                            "reason": {
+                            "cause": {
                                 "type": "string"
                             },
                         }

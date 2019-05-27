@@ -39,6 +39,7 @@ from sfn_callback_urls.exceptions import (
 )
 
 BOTO3_SESSION = boto3.Session()
+STEP_FUNCTIONS_CLIENT = BOTO3_SESSION.client('stepfunctions')
 MASTER_KEY_PROVIDER = None
 if 'KEY_ID' in os.environ:
     MASTER_KEY_PROVIDER = aws_encryption_sdk.KMSMasterKeyProvider(
@@ -113,8 +114,6 @@ def handler(request, context):
 
         return_value = format_response(200, response, request, response_spec, parameters, log_event)
 
-        client = BOTO3_SESSION.client('stepfunctions')
-
         method = f'send_task_{action_type}'
 
         method_params = {
@@ -132,7 +131,7 @@ def handler(request, context):
         
         try:
             sfn_call_start = time.perf_counter()
-            sfn_response = getattr(client, method)(**method_params)
+            sfn_response = getattr(STEP_FUNCTIONS_CLIENT, method)(**method_params)
             sfn_call_finish = time.perf_counter()
             log_event['sfn_call_time'] = (sfn_call_finish-sfn_call_start)
         except botocore.exceptions.ClientError as e:

@@ -48,9 +48,7 @@ schema = {
             },
             "then": {
                 "properties": {
-                    "output": {
-                        "type": "object"
-                    }
+                    "output": {}
                 },
                 "required": ["output"]
             }
@@ -65,7 +63,7 @@ schema = {
                     "error": {
                         "type": "string"
                     },
-                    "reason": {
+                    "cause": {
                         "type": "string"
                     }
                 }

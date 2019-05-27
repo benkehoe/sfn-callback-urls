@@ -17,15 +17,28 @@ a URL for each outcome, which can then be passed on to something deciding the ou
 be `POST`'d or `GET`'d, and will send that outcome on to Step Functions, completing the task.
 
 # Test it out
-```
-$ sam build
-$ sam package --output-template-file packaged-template.yaml --s3-bucket YOUR_BUCKET
-$ sam deploy --template-file packaged-template.yaml --stack-name SfnCallbackUrls
+```bash
+# set these values
+NAME=TODO_YOUR_NAME
+EMAIL=TODO_YOUR_EMAIL
+CODE_BUCKET=TODO_YOUR_S3_BUCKET
 
-$ cd integration_test
-$ sam package --template-file template.yaml --output-template-file packaged-template.yaml --s3-bucket YOUR_BUCKET
-$ sam deploy --stack-name SfnIntegrationTestStack
-$ python test_client.py --stack SfnCallbackUrls --test-stack SfnIntegrationTestStack
+sam build
+sam package --output-template-file packaged-template.yaml --s3-bucket $CODE_BUCKET
+sam deploy --template-file packaged-template.yaml --stack-name SfnCallbackUrls
+
+FUNC=$(aws cloudformation describe-stacks --stack-name SfnCallbackUrls --query "Stacks[0].Outputs[?OutputKey=='Function'].OutputValue" --output text)
+
+aws cloudformation deploy --template-file template.yaml --stack-name SfnCallbackUrlsExample --parameter-overrides Email=$EMAIL CreateUrlsFunction=$FUNC --capabilities CAPABILITY_IAM
+
+# Go to your email and confirm the SNS subscription
+
+STATE_MACHINE=$(aws cloudformation describe-stacks --stack-name SfnCallbackUrlsExample --query "Stacks[0].Outputs[?OutputKey=='StateMachine'].OutputValue" --output text)
+
+aws step-functions start-execution --state-machine-arn $STATE_MACHINE --input "{\"name\": \"$NAME\"}"
+
+# Now you will get an approve/reject email, followed by a confirmation of the same
+
 ```
 
 ## Security

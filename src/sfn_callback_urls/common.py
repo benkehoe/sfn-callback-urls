@@ -17,7 +17,7 @@ import sys
 import json
 
 def is_verbose():
-    return os.environ.get('VERBOSE') in ['1', 'true']
+    return os.environ.get('VERBOSE', '').lower() in ['1', 'true']
 
 DISABLE_PARAMETERS_ENV_VAR_NAME = 'DISABLE_OUTPUT_PARAMETERS'
 def get_force_disable_parameters():

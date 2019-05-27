@@ -1,0 +1,187 @@
+Parameters:
+  Email:
+    Type: String
+  CreateUrlsFunction:
+    Type: String
+Outputs:
+  StateMachine:
+    Value: !Ref StateMachine
+Resources:
+  Topic:
+    Type: AWS::SNS::Topic
+    Properties:
+      Subscription:
+      - Protocol: email
+        Endpoint: !Ref Email
+  
+  GlueFunctionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement: 
+        - Effect: "Allow"
+          Principal: 
+            Service: "lambda.amazonaws.com"
+          Action: "sts:AssumeRole"
+      ManagedPolicyArns:
+      - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+      - PolicyName: RolePolicy
+        PolicyDocument:
+          Statement:
+          - Effect: Allow
+            Action: lambda:InvokeFunction
+            Resource: !Sub "arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:${CreateUrlsFunction}"
+          - Effect: Allow
+            Action: sns:Publish
+            Resource: !Ref Topic
+
+  StateMachineRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument: 
+        Version: "2012-10-17"
+        Statement: 
+        - Effect: "Allow"
+          Principal: 
+            Service: "states.amazonaws.com"
+          Action: "sts:AssumeRole"
+      Policies:
+        - PolicyName: RolePolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+            - Effect: Allow
+              Action: lambda:InvokeFunction
+              Resource: !GetAtt GlueFunction.Arn
+            - Effect: Allow
+              Action: sns:Publish
+              Resource: !Ref Topic
+  
+  StateMachine:
+    Type: AWS::StepFunctions::StateMachine
+    Properties:
+      RoleArn: !GetAtt StateMachineRole.Arn
+      DefinitionString: !Sub |
+        {
+            "StartAt": "WaitForTokenState",
+            "Version": "1.0",
+            "States": {
+                "WaitForTokenState": {
+                    "Type": "Task",
+                    "Resource": "arn:aws:states:::lambda:invoke.waitForTaskToken",
+                    "Parameters": {
+                        "FunctionName": "${GlueFunction}",
+                        "Payload": {
+                            "state.$": "$$.State.Name",
+                            "name_in_input.$": "$.name",
+                            "token.$": "$$.Task.Token"
+                        }
+                    },
+                    "ResultPath": "$.output",
+                    "Next": "SendConfirmation",
+                    "Catch": [
+                        {
+                            "ErrorEquals": [ "rejected" ],
+                            "ResultPath": "$.output",
+                            "Next": "SendConfirmation"
+                        }
+                    ]
+                },
+                "SendConfirmation": {
+                    "Type": "Task",
+                    "Resource": "arn:aws:states:::lambda:invoke",
+                    "Parameters": {
+                        "FunctionName": "${GlueFunction}",
+                        "Payload": {
+                            "state.$": "$$.State.Name",
+                            "output.$": "$.output"
+                        }
+                    },
+                    "End": true
+                }
+            }
+        }
+
+
+  GlueFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      Runtime: python3.6
+      Role: !GetAtt GlueFunctionRole.Arn
+      Handler: index.handler
+      Environment:
+        Variables:
+          CREATE_URLS_FUNCTION_NAME: !Ref CreateUrlsFunction
+          TOPIC_ARN: !Ref Topic
+      Code: 
+        ZipFile: |
+          import json, os, boto3
+          def handler(event, context):
+              print('Event:', json.dumps(event))
+              if event['state'] == 'WaitForTokenState':
+                  input = {
+                      "token": event['token'],
+                      "actions": {
+                          "approve": {
+                              "type": "success",
+                              "output": {
+                                  "name_in_output": event['name_in_input']
+                              }
+                          },
+                          "reject": {
+                              "type": "failure",
+                              "error": "rejected",
+                              "cause": event['name_in_input'] + " rejected it"
+                          }
+                      }
+                  }
+                  response = boto3.client('lambda').invoke(
+                      FunctionName=os.environ['CREATE_URLS_FUNCTION_NAME'],
+                      Payload=json.dumps(input)
+                  )
+                  urls = json.loads(response['Payload'].read())['urls']
+                  print('got urls', urls)
+
+                  email_subject = 'Step Functions example approval request'
+
+                  email_body = """Hello {name},
+                  Click below (these could be better in HTML emails):
+
+                  Approve:
+                  {approve}
+
+                  Reject:
+                  {reject}
+                  """.format(
+                      name=event['name_in_input'],
+                      approve=urls['approve'],
+                      reject=urls['reject']
+                  )
+              elif event['state'] == 'SendConfirmation':
+                  email_subject = 'Step Functions example complete'
+
+                  if 'Error' in event['output']:
+                      email_body = """Hello,
+                      Your task was rejected: {cause}
+                      """.format(
+                          cause=event['output']['Cause']
+                      )
+                  else:
+                      email_body = """Hello {name},
+                      Your task is complete.
+                      """.format(
+                          name=event['output']['name_in_output']
+                      )
+              else:
+                  raise ValueError
+
+              print('sending email', email_body)
+              boto3.client('sns').publish(
+                  TopicArn=os.environ['TOPIC_ARN'],
+                  Subject=email_subject,
+                  Message=email_body
+              )
+              print('done')
+              return {}
