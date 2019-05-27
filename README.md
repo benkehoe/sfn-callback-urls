@@ -65,6 +65,13 @@ The action name and type are put as query parameters on the callback URLs for co
 distinguishable, but they are not trusted. The name and type are also stored in the payload, and when the callback is
 processed, the two are compared and the callback is rejected if they don't match.
 
+The callback method is unauthenticated, it will always result in a Lambda invocation. With encryption enabled, no
+valid input should be able to be provided that hasn't already gone through the authentication URL creation call.
+However, it is still susceptible to denial-of-wallet attacks from someone who knows the endpoint (such as by
+having seen a callback URL). If this is a concern, a good course of action is to
+[enable AWS WAF](https://docs.aws.amazon.com/apigateway/latest/developerguide/apigateway-control-access-aws-waf.html)
+on the API Gateway.
+
 ## Creating URLs
 
 There are two ways to invoke the service: through the API, or direct to a Lambda. Both take identical input payloads.
@@ -81,16 +88,14 @@ managed policy found as the `Policy` output of the CloudFormation stack.
     "actions": { // you must provide at least one action
         "<a name for this action>": {
             "type": "success", // this action will cause SendTaskSuccess
-            "output": { // required, must be an object (can be empty)
+            "output": { // required, can be any JSON type
                 "<your>": "<content>"
             },
             "response": {} // optional, see below
         },
         "<name2>": { // can have as many actions of the same type as you want
             "type": "success",
-            "output": {
-                "<a different>": "<output>"
-            }
+            "output": "<a different output>"
         },
         "<name3>": {
             "type": "failure",  // this action will cause SendTaskFailure
@@ -98,7 +103,7 @@ managed policy found as the `Policy` output of the CloudFormation stack.
             "cause": "<your error cause>" // optional
         },
         "<name4>": {
-            "type": "heartbeat" // this action will cause SendTaskHeartbeat (can invoke callback more than once)
+            "type": "heartbeat" // this action will cause SendTaskHeartbeat (can invoke this type of callback more than once)
         }
     },
     "expiration": "<ISO8601-formatted expiration>", // optional
@@ -109,11 +114,11 @@ managed policy found as the `Policy` output of the CloudFormation stack.
 ### Actions
 
 For each action you define, you will get a callback URL. Each action you provide has a *name* and a *type*.
-The name is your label for the action. The type corresponds to what Step Function API the callback will cause
+The name is your label for the action. The type corresponds to what Step Functions API the callback will cause
 to be invoked, and must be one of `success`, `failure`, or `heartbeat`, corresponding to the `SendTaskSuccess`,
 `SendTaskFailure`, and `SendTaskHeartbeat` API calls, respectively.
 
-For `success` actions, you must provide an `output` field whose value is an object, which will be passed to the
+For `success` actions, you must provide an `output` field, whose value will be passed to the
 same field in `SendTaskSuccess`.
 
 For `failure` options, you may optionally provide `error` and `cause` fields whose values are strings, which will be
@@ -131,6 +136,9 @@ In every action, you can provide a response specification in the `response` fiel
 }
 ```
 
+All fields are optional, and are only used when the callback is successful; all errors return fixed content.
+`redirect` takes precedence over the other fields.
+
 ### Expiration
 
 You can optionally provide an `expiration` value as an
@@ -140,9 +148,11 @@ if a callback is made after then, it will be rejected.
 ### Parameterizing callbacks
 
 If you've got a lot of different potential successful outputs, you may find it easier to parameterize your callbacks.
-This feature is disabled by default; you have to set the `DisableOutputParameters` stack parameter to `false`. Then,
-you must also opt-in when creating URLs by setting the `enable_output_parameters` field to `true`. Any URLs created
-without `enable_output_parameters` set to `true` will not use parameterized output when the callbacks are processed.
+This feature is disabled by default due to the security considerations described below; you have to set
+the `DisableOutputParameters` stack parameter to `false`. Then, you must also opt-in when creating URLs by setting 
+the `enable_output_parameters` field to `true` in your request. Any URLs created without `enable_output_parameters`
+set to `true` will not use parameterized output when the callbacks are processed. If `DisableOutputParameters` is
+changed back to `true`, any previously-created callbacks with parameters enabled will be now rejected.
 
 Once set, any strings in the `output` field for a `success` action, the `error` and `cause` fields for a
 `failure` action, and all the strings in the `response` object are passed through the Python 
@@ -183,3 +193,22 @@ On error:
 You can either GET or POST the callback. The response respects the `Accept` header, supporting `application/json`,
 `text/html`, and `text/plain`, defaulting to JSON otherwise. As outlined above, the response can be customized
 when the callbacks are created.
+
+The JSON response on success:
+```json5
+{
+    "transaction_id": "<the same id returned by the create call>",
+    "action": {
+        "name": "<the action name>",
+        "type": "<the action type>"
+    }
+}
+```
+
+The JSON response on error:
+```json5
+{
+    "error": "<error code>",
+    "message": "<error description>"
+}
+```
