@@ -19,6 +19,7 @@ import json
 import jsonschema
 
 import create_urls
+from sfn_callback_urls.schemas.action import schema as ACTION_SCHEMA
 
 def assert_dicts_equal(a, b):
     assert json.dumps(a, sort_keys=True) == json.dumps(b, sort_keys=True)
@@ -184,11 +185,11 @@ def get_event(actions,
 
 def test_action_schema():
     def assert_good(obj):
-        jsonschema.validate(obj, create_urls.ACTION_SCHEMA)
+        jsonschema.validate(obj, ACTION_SCHEMA)
     
     def assert_bad(obj):
         with pytest.raises(jsonschema.ValidationError):
-            jsonschema.validate(obj, create_urls.ACTION_SCHEMA)
+            jsonschema.validate(obj, ACTION_SCHEMA)
 
     assert_bad({})
 
@@ -301,7 +302,7 @@ def test_wrong_method():
     req = get_request()
     req['httpMethod'] = 'GET'
 
-    resp = create_urls.handler(req, None)
+    resp = create_urls.api_handler(req, None)
 
     assert resp['statusCode'] == 405
 
@@ -309,14 +310,14 @@ def test_wrong_content_type():
     req = get_request()
     req['headers']['Content-Type'] = 'text/plain'
 
-    resp = create_urls.handler(req, None)
+    resp = create_urls.api_handler(req, None)
 
     assert resp['statusCode'] == 415
 
 def test_empty_body():
     req = get_request()
     
-    resp = create_urls.handler(req, None)
+    resp = create_urls.api_handler(req, None)
 
     assert resp['statusCode'] == 400
 
@@ -325,7 +326,7 @@ def test_invalid_json():
 
     req['body'] = '{"foo"'
 
-    resp = create_urls.handler(req, None)
+    resp = create_urls.api_handler(req, None)
 
     assert resp['statusCode'] == 400
     
@@ -339,7 +340,7 @@ def test_invalid_event():
         'token': 1
     })
 
-    resp = create_urls.handler(req, None)
+    resp = create_urls.api_handler(req, None)
 
     assert resp['statusCode'] == 400
     
@@ -357,7 +358,7 @@ def test_basic_request():
         })
     )
 
-    resp = create_urls.handler(req, None)
+    resp = create_urls.api_handler(req, None)
     assert resp['statusCode'] == 200
 
     body = json.loads(resp['body'])
@@ -374,5 +375,5 @@ def test_basic_event(monkeypatch):
         'baz': get_heartbeat()
     })
 
-    resp = create_urls.handler(event, None)
+    resp = create_urls.direct_handler(event, None)
     assert len(resp['urls']) == 3

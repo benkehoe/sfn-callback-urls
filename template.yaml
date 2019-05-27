@@ -25,6 +25,20 @@ Parameters:
     Description: If encryption is enabled, set this to use your own KMS key, or set to NONE to create one
     Type: String
     Default: 'NONE'
+  DisableOutputParameters:
+    Description: Disallow the use of query parameters to customize the result of callbacks
+    Type: String
+    AllowedValues:
+      - "true"
+      - "false"
+    Default: "true"
+  VerboseLogging:
+    Description: Enable verbose logging
+    Type: String
+    AllowedValues:
+      - "true"
+      - "false"
+    Default: "false"
 Conditions:
   EncryptionEnabled:
     Fn::Equals: [ !Ref UseEncryption, "true" ]
@@ -57,6 +71,7 @@ Resources:
   Api:
     Type: AWS::ApiGateway::RestApi
     Properties:
+      Name: Callback URLs service for Step Functions
       EndpointConfiguration:
         Types:
         - REGIONAL
@@ -142,6 +157,29 @@ Resources:
           ]
         }
 
+  CreateUrlsLogsPolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      Roles:
+      - !Ref CreateUrlsRole
+      PolicyName: LambdaLogging
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement: 
+          - Effect: Allow
+            Action:
+              - "logs:CreateLogStream"
+              - "logs:CreateLogGroup"
+            Resource:
+              - !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/${CreateUrls}:*"
+              - !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/${CreateUrlsForApi}:*"
+          - Effect: Allow
+            Action:
+              - "logs:PutLogEvents"
+            Resource:
+              - !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/${CreateUrls}:log-stream:*"
+              - !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/${CreateUrlsForApi}:log-stream:*"
+
   CreateUrlsForApi:
     Type: 'AWS::Serverless::Function'
     Properties:
@@ -152,6 +190,8 @@ Resources:
       MemorySize: 1024
       Environment:
         Variables:
+          DISABLE_OUTPUT_PARAMETERS: !Ref DisableOutputParameters
+          VERBOSE: !Ref Verbose
           KEY_ID: 
             "Fn::If":
               - EncryptionEnabled
@@ -171,6 +211,8 @@ Resources:
       MemorySize: 1024
       Environment:
         Variables:
+          DISABLE_OUTPUT_PARAMETERS: !Ref DisableOutputParameters
+          VERBOSE: !Ref Verbose
           API_ID: !Ref Api
           STAGE: !Ref ApiStage
           KEY_ID: 
@@ -199,7 +241,7 @@ Resources:
           ]
         }
 
-  ProcessCallbackPolicy:
+  ProcessCallbackSfnPolicy:
     Type: AWS::IAM::Policy
     Properties:
       Roles:
@@ -214,6 +256,25 @@ Resources:
               - "states:SendTaskFailure"
               - "states:SendTaskHeartbeat"
             Resource: "*"
+    
+  ProcessCallbackLogsPolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      Roles:
+      - !Ref ProcessCallbackRole
+      PolicyName: LambdaLogging
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement: 
+          - Effect: Allow
+            Action:
+              - "logs:CreateLogStream"
+              - "logs:CreateLogGroup"
+            Resource: !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/${ProcessCallbackFunction}:*"
+          - Effect: Allow
+            Action:
+              - "logs:PutLogEvents"
+            Resource: !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/${ProcessCallbackFunction}:log-stream:*"
 
   ProcessCallbackFunction:
     Type: 'AWS::Serverless::Function'
@@ -226,6 +287,8 @@ Resources:
       Timeout: 15
       Environment:
         Variables:
+          DISABLE_OUTPUT_PARAMETERS: !Ref DisableOutputParameters
+          VERBOSE: !Ref Verbose
           KEY_ID:
             "Fn::If":
               - EncryptionEnabled
@@ -235,26 +298,6 @@ Resources:
                   - !Ref EncryptionKeyArn
               - !Ref AWS::NoValue
   
-  LogsPolicy:
-    Type: AWS::IAM::Policy
-    Properties:
-      Roles:
-      - !Ref CreateUrlsRole
-      - !Ref ProcessCallbackRole
-      PolicyName: LambdaLogging
-      PolicyDocument:
-        Version: "2012-10-17"
-        Statement: 
-          - Effect: Allow
-            Action:
-              - "logs:CreateLogGroup"
-            Resource: !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:*"
-          - Effect: Allow
-            Action:
-              - "logs:CreateLogStream"
-              - "logs:PutLogEvents"
-            Resource: !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/*:*"
-
   ApiDeployment:
     Type: AWS::ApiGateway::Deployment
     DependsOn:

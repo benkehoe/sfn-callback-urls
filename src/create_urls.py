@@ -29,16 +29,16 @@ import jsonschema
 
 from sfn_callback_urls.payload import PayloadBuilder, encode_payload
 from sfn_callback_urls.callbacks import get_url
-from sfn_callback_urls.common import send_log_event, RequestError
+from sfn_callback_urls.common import send_log_event, get_header, is_verbose
 
-class MissingApiParametersError(RequestError):
-    pass
+from sfn_callback_urls.exceptions import (
+    BaseError,
+    MissingApiParametersError,
+    InvalidActionError,
+    InvalidDateError
+)
 
-class InvalidActionError(RequestError):
-    pass
-
-class InvalidDateError(RequestError):
-    pass
+from sfn_callback_urls.schemas.create_urls import schema as CREATE_URL_EVENT_SCHEMA
 
 """
 EVENT EXAMPLE
@@ -49,6 +49,9 @@ EVENT EXAMPLE
         'name1': {
             'type': 'success',
             'output': {},
+            'response': {
+                'redirect': 'https://...'
+            }
         },
         'name2': {
             'type': 'failure',
@@ -68,89 +71,6 @@ EVENT EXAMPLE
 }
 """
 
-ACTION_SCHEMA = {
-    "type": "object",
-    "properties": {
-        "type": {
-            "type": "string",
-            "enum": ["success", "failure", "heartbeat"]
-        },
-    },
-    "required": ["type"],
-    "allOf": [
-        {
-            "if": {
-                "properties": { "type": { "const": "success" } }
-            },
-            "then": {
-                "properties": {
-                    "output": {
-                        "type": "object"
-                    }
-                },
-                "required": ["output"]
-            }
-            
-        },
-        {
-            "if": {
-                "properties": { "type": { "const": "failure" } }
-            },
-            "then": {
-                "properties": {
-                    "error": {
-                        "type": "string"
-                    },
-                    "reason": {
-                        "type": "string"
-                    }
-                }
-            }
-        }
-    ]
-}
-
-CREATE_URL_EVENT_SCHEMA = {
-    "type": "object",
-    "properties": {
-        "token": {
-            "type": "string"
-        },
-        "expiration": {
-            "type": "string",
-            "format": "date-time"
-        },
-        "actions": {
-            "type": "object",
-            "additionalProperties": False,
-            "patternProperties": {
-                "^\\w+$": ACTION_SCHEMA,
-            },
-            "minProperties": 1,
-        },
-        "enable_output_parameters": {
-            "type": "boolean"
-        },
-        "api": {
-            "type": "object",
-            "properties": {
-                "api_id": {
-                    "type": "string"
-                },
-                "stage": {
-                    "type": "string"
-                },
-                "region": {
-                    "type": "string",
-                }
-            },
-            "required": ["api_id", "stage"]
-        }
-    },
-    "required": ["token", "actions"],
-    "additionalProperties": False
-}
-
 BOTO3_SESSION = boto3.Session()
 MASTER_KEY_PROVIDER = None
 if 'KEY_ID' in os.environ:
@@ -158,12 +78,6 @@ if 'KEY_ID' in os.environ:
         key_ids = [os.environ['KEY_ID']],
         botocore_session = BOTO3_SESSION._session
     )
-
-def get_header(event, name):
-    for key in event['headers']:
-        if key.lower() == name.lower():
-            return event['headers'][key]
-    return None
 
 DefaultApiInfo = namedtuple('DefaultApiInfo', ['region', 'api_id', 'stage'])
 
@@ -180,6 +94,9 @@ def direct_handler(event, context):
     return process_event(event, context, default_api_info, response_formatter)
 
 def api_handler(event, context):
+    if is_verbose:
+        print(f'Request: {event}')
+
     default_api_info = DefaultApiInfo(
         region=BOTO3_SESSION.region_name,
         api_id=event['requestContext']['apiId'],
@@ -228,7 +145,8 @@ def api_handler(event, context):
     return process_event(event, context, default_api_info, response_formatter)
 
 def process_event(event, context, default_api_info, response_formatter):
-    print(f'Received event: {event}')
+    if is_verbose:
+        print(f'Input: {event}')
         
     try:
         jsonschema.validate(event, CREATE_URL_EVENT_SCHEMA)
@@ -298,18 +216,21 @@ def process_event(event, context, default_api_info, response_formatter):
         for action_name, action_data in event['actions'].items():
             action_type = action_data['type']
             actions[action_name] = action_type
-            payload_data = {}
+            action_payload_data = {}
             
             if action_type == 'success':
-                payload_data['output'] = action_data['output']
+                action_payload_data['output'] = action_data['output']
             elif action_type == 'failure':
                 for key in ['error', 'cause']:
                     if key in action_data:
-                        payload_data[key] = action_data[key]
+                        action_payload_data[key] = action_data[key]
             elif action_type != 'heartbeat':
                 raise InvalidActionError(f'Unexpected action type {action_type}')
 
-            payload = payload_builder.build(action_name, action_type, payload_data,
+            action_response_data = action_data.get('response', {})
+
+            payload = payload_builder.build(action_name, action_type, action_payload_data,
+                    response=action_response_data,
                     log_event=log_event)
 
             encoded_payload = encode_payload(payload, MASTER_KEY_PROVIDER)
@@ -320,12 +241,15 @@ def process_event(event, context, default_api_info, response_formatter):
 
         log_event['actions'] = actions
         
-        print(f'Sending response: {json.dumps(response)}')
+        return_value = response_formatter(200, response)
 
         send_log_event(log_event)
 
-        return response_formatter(200, response)
-    except RequestError as e:
+        if is_verbose:
+            print(f'Response: {json.dumps(return_value)}')
+
+        return return_value
+    except BaseError as e:
         response = {
             'transaction_id': transaction_id,
             'error': e.code(),
@@ -336,8 +260,11 @@ def process_event(event, context, default_api_info, response_formatter):
             'error': e.code(),
             'message': e.message(),
         }
+        return_value = response_formatter(400, response)
         send_log_event(log_event)
-        return response_formatter(400, response)
+        if is_verbose:
+            print(f'Response: {json.dumps(return_value)}')
+        return return_value
     except Exception as e:
         traceback.print_exc()
         error_class_name = type(e).__module__ + '.' + type(e).__name__
@@ -350,5 +277,8 @@ def process_event(event, context, default_api_info, response_formatter):
             'error': error_class_name,
             'message': str(e),
         }
+        return_value = response_formatter(500, response)
         send_log_event(log_event)
-        return response_formatter(500, response)
+        if is_verbose:
+            print(f'Response: {json.dumps(return_value)}')
+        return return_value

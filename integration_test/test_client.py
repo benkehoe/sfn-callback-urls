@@ -16,6 +16,7 @@ import argparse
 import uuid
 import json
 import time
+from collections import namedtuple
 
 import boto3
 import aws_encryption_sdk
@@ -151,16 +152,23 @@ def run(api_url, test_stack_name, session):
             'actions': {
                 'good': {
                     'type': 'success',
-                    'output': output
+                    'output': output,
                 },
                 'bad': {
                     'type': 'failure',
-                    'error': correlation_id
+                    'error': correlation_id,
+                    'response': {
+                        'html': 'Hello $hello'
+                    }
                 },
                 'hb': {
-                    'type': 'heartbeat'
+                    'type': 'heartbeat',
+                    'response': {
+                        'redirect': 'https://google.com'
+                    }
                 }
-            }
+            },
+            "enable_output_parameters": True
         }
 
     print(f'Getting URLs: {url}')
@@ -174,6 +182,8 @@ def run(api_url, test_stack_name, session):
     if response.status_code != 200:
         print(f'Response headers: {response.headers}')
     print(f'Response body: {json.dumps(response.json(), indent=2)}')
+
+    # return
 
     response = response.json()
 

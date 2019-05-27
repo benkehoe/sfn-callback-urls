@@ -28,7 +28,8 @@ from sfn_callback_urls.payload import (
     encode_payload,
     decode_payload, DecryptionUnsupportedError, EncryptionRequiredError
 )
-from sfn_callback_urls.common import DISABLE_PARAMETERS_ENV_VAR_NAME, ParametersDisabledError
+from sfn_callback_urls.common import DISABLE_PARAMETERS_ENV_VAR_NAME
+from sfn_callback_urls.exceptions import ParametersDisabledError
 
 PAYLOAD_SKELETON = {
     'iss': 'function name',
@@ -189,6 +190,7 @@ def test_basic_payload_coding():
             'output': {}
         },
         'par': False,
+        'url': 'https://example.com',
     }
 
     validate_payload_schema(payload)

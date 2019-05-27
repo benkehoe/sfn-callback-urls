@@ -21,22 +21,18 @@ import datetime
 import aws_encryption_sdk
 import jsonschema
 
-from .common import get_force_disable_parameters, RequestError, ParametersDisabledError
+from .common import get_force_disable_parameters
 
-class InvalidPayloadError(RequestError):
-    pass
+from .exceptions import (
+    ParametersDisabledError,
+    InvalidPayloadError,
+    ExpiredPayloadError,
+    EncryptionError,
+    DecryptionUnsupportedError,
+    EncryptionRequiredError
+)
 
-class ExpiredPayloadError(RequestError):
-    pass
-
-class EncryptionError(RequestError):
-    pass
-
-class DecryptionUnsupportedError(RequestError):
-    pass
-
-class EncryptionRequiredError(RequestError):
-    pass
+from .schemas.payload import schema as PAYLOAD_SCHEMA
 
 PAYLOAD_SKELETON = {
     'token': '',
@@ -48,73 +44,6 @@ PAYLOAD_SKELETON = {
     'act': '', # action_type
     'out': {}, # output for the task, for success and optional for failure
     'par': False, # enable the caller to pass parameters for the output
-}
-
-PAYLOAD_SCHEMA = {
-    "type": "object",
-    "properties": {
-        "iss": {"type": "string"},
-        "iat": {"type": "number"},
-        "tid": {"type": "string"},
-        "exp": {"type": "number"},
-        "token": {"type": "string"},
-        "name": {
-            "type": "string"
-        },
-        "act": {
-            "type": "string",
-            "enum": ["success", "failure", "heartbeat"]
-        },
-        "data": {
-            "type": "object"
-        },
-        "par": {
-            "type": "boolean"
-        }
-    },
-    "required": ["token", "name", "act", "data"],
-    "allOf": [
-        {
-            "if": {
-                "properties": { "act": { "const": "success" } }
-            },
-            "then": {
-                "properties": {
-                    "data": {
-                        "type": "object",
-                        "properties": {
-                            "output": {
-                                "type": "object"
-                            }
-                        },
-                        "required": ["output"]
-                    },
-                    
-                },
-                "required": ["data"],
-            }
-        },
-        {
-            "if": {
-                "properties": { "act": { "const": "failure" } }
-            },
-            "then": {
-                "properties": {
-                    "data": {
-                        "type": "object",
-                        "properties": {
-                            "error": {
-                                "type": "string"
-                            },
-                            "reason": {
-                                "type": "string"
-                            },
-                        }
-                    }
-                }
-            }
-        }
-    ]
 }
 
 class PayloadBuilder:
@@ -132,7 +61,7 @@ class PayloadBuilder:
 
         self.issuer = os.environ.get('AWS_LAMBDA_FUNCTION_NAME')
     
-    def build(self, action_name, action_type, action_data, log_event={}):
+    def build(self, action_name, action_type, action_data, response={}, log_event={}):
         payload = {
             'token': self.token,
             'iat': int(self.timestamp.timestamp()),
@@ -164,6 +93,13 @@ class PayloadBuilder:
                 log_event['parameters_enabled'] = True
                 payload['par'] = True
         
+        if response:
+            if 'redirect' in response:
+                log_event['redirect'] = True
+            if any(v in response for v in ['json', 'html', 'text']):
+                log_event['response_override'] = True
+            payload['resp'] = response
+
         return payload
 
 def encode_payload(payload, master_key_provider):

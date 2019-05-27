@@ -19,7 +19,7 @@ import os
 import uuid
 import sys
 import traceback
-from collections import namedtuple
+from collections import namedtuple, OrderedDict
 import time
 
 import boto3
@@ -27,18 +27,16 @@ import botocore.exceptions
 import aws_encryption_sdk
 import jsonschema
 
-from sfn_callback_urls.callbacks import load_from_request, format_output
+from sfn_callback_urls.callbacks import load_from_request, format_output, format_response
 from sfn_callback_urls.payload import decode_payload, validate_payload_schema, validate_payload_expiration
-from sfn_callback_urls.common import send_log_event, get_force_disable_parameters, RequestError, BaseError
+from sfn_callback_urls.common import send_log_event, get_force_disable_parameters, is_verbose
 
-class ActionMismatchedError(RequestError):
-    pass
-
-class ParametersDisabledError(RequestError):
-    pass
-
-class StepFunctionsError(BaseError):
-    TYPE = 'StepFunctionsError'
+from sfn_callback_urls.exceptions import (
+    BaseError,
+    ActionMismatchedError,
+    ParametersDisabledError,
+    StepFunctionsError
+)
 
 BOTO3_SESSION = boto3.Session()
 MASTER_KEY_PROVIDER = None
@@ -48,8 +46,9 @@ if 'KEY_ID' in os.environ:
         botocore_session = BOTO3_SESSION._session
     )
 
-def handler(event, context):
-    print(f'Received event: {event}')
+def handler(request, context):
+    if is_verbose:
+        print(f'Request: {json.dumps(request)}')
 
     timestamp = datetime.datetime.now()
 
@@ -58,19 +57,29 @@ def handler(event, context):
     }
 
     try:
-        response = {}
+        response = OrderedDict()
 
         (
             action_name_from_url,
             action_type_from_url,
             encoded_payload,
             parameters
-        ) = load_from_request(event)
+        ) = load_from_request(request)
 
         decode_start = time.perf_counter()
         payload = decode_payload(encoded_payload, MASTER_KEY_PROVIDER)
         decode_finish = time.perf_counter()
         log_event['decode_time'] = (decode_finish - decode_start)
+
+        validate_payload_schema(payload)
+
+        if is_verbose:
+            print(f'Payload: {json.dumps(payload)}')
+        
+        log_event['transaction_id'] = payload['tid']
+        response['transaction_id'] = payload['tid']
+        
+        validate_payload_expiration(payload, timestamp)
         
         action_name_in_payload = payload['name']
         if action_name_from_url and action_name_from_url != action_name_in_payload:
@@ -86,17 +95,24 @@ def handler(event, context):
             'name': action_name,
             'type': action_type
         }
+        response['action'] = OrderedDict((
+            ('name', action_name),
+            ('type', action_type),
+        ))
 
-        validate_payload_schema(payload)
-        validate_payload_expiration(payload, timestamp)
-        
         force_disable_parameters = get_force_disable_parameters()
         use_parameters = payload.get('par', False)
         if use_parameters and force_disable_parameters:
             raise ParametersDisabledError('Parameters are disabled')
+        if not use_parameters:
+            parameters = None
         
         action_data = payload.get('data', {})
-        
+
+        response_spec = payload.get('resp', {})
+
+        return_value = format_response(200, response, request, response_spec, parameters, log_event)
+
         client = BOTO3_SESSION.client('stepfunctions')
 
         method = f'send_task_{action_type}'
@@ -107,8 +123,7 @@ def handler(event, context):
 
         if action_type == 'success':
             output = action_data.get('output', {})
-            if use_parameters:
-                output = format_output(output, parameters)
+            output = format_output(output, parameters)
             method_params['output'] = json.dumps(output)
         elif action_type == 'failure':
             for key in ['error', 'cause']:
@@ -134,52 +149,41 @@ def handler(event, context):
                 raise StepFunctionsError(error_msg)
             raise
 
-        print(f'Sending response: {json.dumps(response)}')
-
         send_log_event(log_event)
 
-        return {
-            'statusCode': 200,
-            'headers': {
-                'Content-Type': 'application/json',
-            },
-            'body': json.dumps(response)
-        }
+        if is_verbose:
+            print(f'Response: {json.dumps(return_value)}')
+
+        return return_value
     except BaseError as e:
-        response = {
-            'error': e.code(),
-            'message': e.message(),
-        }
+        response = OrderedDict((
+            ('error', e.code()),
+            ('message', e.message()),
+        ))
         log_event['error'] = {
             'type': e.TYPE,
             'error': e.code(),
             'message': e.message(),
         }
+        return_value = format_response(400, response, request, {}, None, log_event)
         send_log_event(log_event)
-        return {
-            'statusCode': 400,
-            'headers': {
-                'Content-Type': 'application/json',
-            },
-            'body': json.dumps(response)
-        }
+        if is_verbose:
+            print(f'Response: {json.dumps(return_value)}')
+        return return_value
     except Exception as e:
         traceback.print_exc()
         error_class_name = type(e).__module__ + '.' + type(e).__name__
-        response = {
-            'error': 'ServiceError',
-            'message': f'{error_class_name}: {str(e)}'
-        }
+        response = OrderedDict((
+            ('error', 'ServiceError'),
+            ('message', f'{error_class_name}: {str(e)}'),
+        ))
         log_event['error'] = {
             'type': 'Unexpected',
             'error': error_class_name,
             'message': str(e),
         }
+        return_value = format_response(500, response, request, {}, None, log_event)
         send_log_event(log_event)
-        return {
-            'statusCode': 500,
-            'headers': {
-                'Content-Type': 'application/json',
-            },
-            'body': json.dumps(response)
-        }
+        if is_verbose:
+            print(f'Response: {json.dumps(return_value)}')
+        return return_value
