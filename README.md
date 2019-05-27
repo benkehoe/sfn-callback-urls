@@ -29,7 +29,7 @@ sam deploy --template-file packaged-template.yaml --stack-name SfnCallbackUrls
 
 FUNC=$(aws cloudformation describe-stacks --stack-name SfnCallbackUrls --query "Stacks[0].Outputs[?OutputKey=='Function'].OutputValue" --output text)
 
-aws cloudformation deploy --template-file template.yaml --stack-name SfnCallbackUrlsExample --parameter-overrides Email=$EMAIL CreateUrlsFunction=$FUNC --capabilities CAPABILITY_IAM
+aws cloudformation deploy --template-file example/template.yaml --stack-name SfnCallbackUrlsExample --parameter-overrides Email=$EMAIL CreateUrlsFunction=$FUNC --capabilities CAPABILITY_IAM
 
 # Go to your email and confirm the SNS subscription
 
