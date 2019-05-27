@@ -62,7 +62,7 @@ managed policy found as the `Policy` output of the CloudFormation stack.
 
 ### Input
 
-```json
+```js
 {
     "token": "<the token from Step Functions>", // required
     "actions": { // you must provide at least one action
@@ -109,7 +109,7 @@ passed to the same fields in `SendTaskFailure`.
 #### Callback response specification
 In every action, you can provide a response specification in the `response` field with an object like this:
 
-```json
+```js
 {
     "redirect": "https://example.com", // if the callback is successful, redirect the user to the given URL
     "json": {"hello": "world"}, // choose the JSON object returned by the callback for the application/json content-type
@@ -147,7 +147,7 @@ someone could modify the query parameters to send unexpected output.
 ### Output
 
 On success:
-```json
+```js
 {
     "transaction_id": "<a unique id>", // for correlation
     "urls": {
@@ -158,7 +158,7 @@ On success:
 ```
 
 On error:
-```json
+```js
 {
     "error": "<error code>",
     "message": "<error description>"
