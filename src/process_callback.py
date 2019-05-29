@@ -142,10 +142,9 @@ def handler(request, context):
                 'InvalidToken',
                 'TaskDoesNotExist',
                 'TaskTimedOut',
-
             ]
             if error_code in errors:
-                raise StepFunctionsError(error_msg)
+                raise StepFunctionsError(f'{error_code}:{error_msg}')
             raise
 
         send_log_event(log_event)
