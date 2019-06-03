@@ -13,6 +13,21 @@
 # limitations under the License.
 
 Transform: 'AWS::Serverless-2016-10-31'
+Metadata:
+  AWS::ServerlessRepo::Application:
+    Name: sfn-callback-urls
+    Description: Easy handling of Step Function tokens as callback URLs
+    Author: Ben Kehoe
+    Labels:
+      - stepfunctions
+      - callback
+      - email
+    SpdxLicenseId: Apache-2.0
+    LicenseUrl: LICENSE
+    ReadmeUrl: README.md
+    HomePageUrl: https://github.com/benkehoe/sfn-callback-urls
+    SemanticVersion: 0.1.0
+    SourceCodeUrl: https://github.com/benkehoe/sfn-callback-urls
 Parameters:
   UseEncryption:
     Description: Enable or disable encryption for callback payloads

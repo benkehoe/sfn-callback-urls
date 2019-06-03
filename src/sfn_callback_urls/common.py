@@ -17,10 +17,12 @@ import sys
 import json
 
 def is_verbose():
+    """Check before debug print statements. Too lazy to go full logger"""
     return os.environ.get('VERBOSE', '').lower() in ['1', 'true']
 
 DISABLE_PARAMETERS_ENV_VAR_NAME = 'DISABLE_OUTPUT_PARAMETERS'
 def get_force_disable_parameters():
+    """Check for the env var that we'll use to prevent parameterizing the callback fields"""
     force_disable_parameters = False
     if DISABLE_PARAMETERS_ENV_VAR_NAME in os.environ:
         value = os.environ[DISABLE_PARAMETERS_ENV_VAR_NAME]
@@ -29,10 +31,13 @@ def get_force_disable_parameters():
         force_disable_parameters = value.lower() not in ['0', 'false']
     return force_disable_parameters
 
-def send_log_event(log_event):
+def send_log_event(log_event: dict):
+    """Dump the log event to stdout, Lambda will put it in CloudWatch"""
     print(json.dumps(log_event))
 
-def get_header(request, name):
+def get_header(request: dict, name: str):
+    """Get a header from the request payload sent by API Gateway proxy integration to Lambda.
+    Does not deal with multi-value headers, but that's fine for this app"""
     for key in request['headers']:
         if key.lower() == name.lower():
             return request['headers'][key]

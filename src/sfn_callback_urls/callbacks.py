@@ -50,6 +50,7 @@ def get_url(action_name, action_type, payload,
 def load_from_request(request):
     query_parameters = request['queryStringParameters']
 
+    # these don't have to be present
     action_name = query_parameters.get(ACTION_NAME_QUERY_PARAM)
     action_type = query_parameters.get(ACTION_TYPE_QUERY_PARAM)
 
@@ -58,6 +59,8 @@ def load_from_request(request):
     
     payload = query_parameters[PAYLOAD_QUERY_PARAM]
 
+    # for parameterizing the output, grab everything in the
+    # query string except the payload.
     parameters = {}
     for k, v in query_parameters.items():
         if k not in [PAYLOAD_QUERY_PARAM]:
@@ -66,6 +69,7 @@ def load_from_request(request):
     return action_name, action_type, payload, parameters
 
 def format_output(output, parameters):
+    # Apply string templating to all strings contained within output (recursively)
     if parameters is None:
         return output
     

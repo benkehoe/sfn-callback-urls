@@ -13,13 +13,13 @@
         {
             "label": "package",
             "type": "shell",
-            "command": "pipenv run sam package --template-file .aws-sam/build/template.yaml --output-template-file .aws-sam/build/packaged-template.yaml --s3-bucket '${input:bucketName}'",
+            "command": "pipenv run sam package --template-file .aws-sam/build/template.yaml --output-template-file packaged-template.yaml --s3-bucket '${input:bucketName}'",
             "problemMatcher": []
         },
         {
             "label": "deploy",
             "type": "shell",
-            "command": "pipenv run sam deploy --template-file .aws-sam/build/packaged-template.yaml --capabilities CAPABILITY_IAM --stack-name ${input:stackName}",
+            "command": "pipenv run sam deploy --template-file packaged-template.yaml --capabilities CAPABILITY_IAM --stack-name ${input:stackName}",
             "problemMatcher": []
         }
     ],

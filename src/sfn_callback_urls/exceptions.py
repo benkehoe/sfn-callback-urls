@@ -28,6 +28,7 @@ class BaseError(Exception):
         return f'{self.code()}:{self.message()}'
 
 class RequestError(BaseError):
+    """Base class for general client-caused 400 errors"""
     TYPE = 'RequestError'
 
 class ParametersDisabledError(RequestError):
@@ -64,4 +65,5 @@ class ActionMismatchedError(RequestError):
     pass
 
 class StepFunctionsError(BaseError):
+    """Still a 400 error, but resulting from the call to Step Functions"""
     TYPE = 'StepFunctionsError'

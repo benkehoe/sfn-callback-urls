@@ -2,8 +2,8 @@
 asn1crypto==0.24.0
 attrs==19.1.0
 aws-encryption-sdk==1.4.0
-boto3==1.9.156
-botocore==1.12.156
+boto3==1.9.158
+botocore==1.12.158
 cffi==1.12.3
 cryptography==2.6.1
 docutils==0.14

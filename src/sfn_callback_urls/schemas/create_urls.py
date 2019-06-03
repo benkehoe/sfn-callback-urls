@@ -14,15 +14,42 @@
 
 from .action import schema as _ACTION_SCHEMA
 
+skeleton = lambda: {
+    "token": "<from Step Functions>",
+    "actions": {
+        "<action name 1>": {
+            "type": "success",
+            "output": {
+                "<user>": "<defined>"
+            },
+            "response": {
+                "redirect": "https://example.com"
+            }
+        },
+        "<action name 2>": {
+            "type": "failure",
+            "error": "MyErrorCode",
+            "cause": "User-friendly message",
+        },
+        "<action name 3>": {
+            "type": "heartbeat",
+            "response": {
+                "json": {
+                    "ekg": "thump_thump"
+                },
+                "html": "<html>thump thump</html>"
+            }
+        }
+    },
+    "expiration": "<RFC3339-formatted datetime>",
+    "enable_output_parameters": False,
+}
+
 schema = {
     "type": "object",
     "properties": {
         "token": {
             "type": "string"
-        },
-        "expiration": {
-            "type": "string",
-            "format": "date-time"
         },
         "actions": {
             "type": "object",
@@ -31,6 +58,10 @@ schema = {
                 "^\\w+$": _ACTION_SCHEMA,
             },
             "minProperties": 1,
+        },
+        "expiration": {
+            "type": "string",
+            "format": "date-time"
         },
         "enable_output_parameters": {
             "type": "boolean"

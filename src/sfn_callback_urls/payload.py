@@ -34,18 +34,6 @@ from .exceptions import (
 
 from .schemas.payload import schema as PAYLOAD_SCHEMA
 
-PAYLOAD_SKELETON = {
-    'token': '',
-    'iss': 'function name',
-    'iat': 0, # unix timestamp
-    'tid': '', # transaction id
-    'exp': 0, # expiration unix timestamp
-    'name': '', # action_name
-    'act': '', # action_type
-    'out': {}, # output for the task, for success and optional for failure
-    'par': False, # enable the caller to pass parameters for the output
-}
-
 class PayloadBuilder:
     def __init__(self, 
             transaction_id,
@@ -66,11 +54,6 @@ class PayloadBuilder:
             'token': self.token,
             'iat': int(self.timestamp.timestamp()),
             'tid': self.transaction_id,
-            #exp: expiration
-            #name: action_name
-            #act: action_type
-            #data: data for the action
-            #par: enable the caller to pass parameters for the output
         }
         if self.issuer:
             payload['iss'] = self.issuer
@@ -114,9 +97,11 @@ def encode_payload(payload, master_key_provider):
                 key_provider=master_key_provider
             )
         except aws_encryption_sdk.exceptions.GenerateKeyError as e:
+            # This can happen if the key policy does not allow the sfn-callback-urls IAM role
+            # to use the key.
             raise EncryptionError(f'Failed to create DEK; check your key policy ({str(e)})')
         except aws_encryption_sdk.exceptions.AWSEncryptionSDKClientError as e:
-            # unexpected
+            # unexpected, turn into a 500 error
             raise 
 
         return '2-' + str(base64.urlsafe_b64encode(ciphertext), 'ascii')
@@ -148,6 +133,11 @@ def decode_payload(payload, master_key_provider):
         raise InvalidPayloadError(f'Base64 error ({str(e)})')
 
     if version == '1':
+        # sfn-callback-urls to make an authenticated call on behalf of an
+        # unauthenticated caller. With encryption turned off, the caller may pass in
+        # a payload that was not created by a create_urls call by an authenticated 
+        # caller, and is therefore an opportunity for escalation of privileges.
+        # Therefore, we only process unencrypted payloads if encryption is actually disabled.
         if master_key_provider:
             raise EncryptionRequiredError('Only encrypted payloads are supported')
         try:

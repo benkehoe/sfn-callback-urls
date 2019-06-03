@@ -40,36 +40,7 @@ from sfn_callback_urls.exceptions import (
 
 from sfn_callback_urls.schemas.create_urls import schema as CREATE_URL_EVENT_SCHEMA
 
-"""
-EVENT EXAMPLE
-{
-    'token': '',
-    'expiration': '',
-    'actions': {
-        'name1': {
-            'type': 'success',
-            'output': {},
-            'response': {
-                'redirect': 'https://...'
-            }
-        },
-        'name2': {
-            'type': 'failure',
-            'error': '',
-            'cause': '',
-        },
-        'name3': {
-            'type': 'heartbeat',
-        }
-    },
-    'enable_output_parameters': False,
-    'api': {
-        'api_id': '',
-        'stage': '',
-        'region': '',
-    }
-}
-"""
+# See schemas.create_urls for example event
 
 BOTO3_SESSION = boto3.Session()
 MASTER_KEY_PROVIDER = None
@@ -82,6 +53,7 @@ if 'KEY_ID' in os.environ:
 DefaultApiInfo = namedtuple('DefaultApiInfo', ['region', 'api_id', 'stage'])
 
 def direct_handler(event, context):
+    """The handler for the CreateUrls Lambda, directly invoked by users"""
     default_api_info = DefaultApiInfo(
         region=BOTO3_SESSION.region_name,
         api_id=os.environ['API_ID'],
@@ -94,6 +66,7 @@ def direct_handler(event, context):
     return process_event(event, context, default_api_info, response_formatter)
 
 def api_handler(event, context):
+    """The handler for create URLs calls that come through API Gateway"""
     if is_verbose:
         print(f'Request: {event}')
 
@@ -112,6 +85,7 @@ def api_handler(event, context):
             'body': json.dumps(response)
         }
 
+    # Only allow POST
     if event['httpMethod'] != 'POST':
         return {
             'statusCode': 405,
@@ -120,6 +94,7 @@ def api_handler(event, context):
             }
         }
     
+    # Require JSON content type
     if get_header(event, 'content-type') != 'application/json':
         return {
             'statusCode': 415,
@@ -166,6 +141,9 @@ def process_event(event, context, default_api_info, response_formatter):
     }
 
     try:
+        # Allow the user to specify another API Gateway, either for a separate sfn-callback-urls
+        # deployment, for example in a multi-region or multi-account scenario. The user is on
+        # their own for getting the same KMS key in both places.
         if 'api' in event:
             api_spec = event['api']
             region = api_spec.get('region', default_api_info.region)

@@ -58,7 +58,7 @@ def handler(request, context):
     }
 
     try:
-        response = OrderedDict()
+        response = OrderedDict() # ordered so it appears sensibly in the HTML output
 
         (
             action_name_from_url,
@@ -77,11 +77,17 @@ def handler(request, context):
         if is_verbose:
             print(f'Payload: {json.dumps(payload)}')
         
+        # use the same transaction id given out in the create urls call
         log_event['transaction_id'] = payload['tid']
         response['transaction_id'] = payload['tid']
         
         validate_payload_expiration(payload, timestamp)
         
+        # we put the action name and type in the query string directly for convenience
+        # but we only trust the version that's in the payload. If the query string
+        # versions differ from the payload, something funny is going on and we reject
+        # the request. But if they are absent, it's not a problem.
+
         action_name_in_payload = payload['name']
         if action_name_from_url and action_name_from_url != action_name_in_payload:
             raise ActionMismatchedError(f'The action name says {action_name_from_url} in the url but {action_name_in_payload} in the payload')
@@ -101,6 +107,9 @@ def handler(request, context):
             ('type', action_type),
         ))
 
+        # If parameters are disabled, refuse to service a request
+        # that has parameters enabled, even though it was presumably
+        # valid at creation time to have parameters enabled.
         force_disable_parameters = get_force_disable_parameters()
         use_parameters = payload.get('par', False)
         if use_parameters and force_disable_parameters:
@@ -137,6 +146,10 @@ def handler(request, context):
         except botocore.exceptions.ClientError as e:
             error_code = e.response['Error']['Code']
             error_msg = e.response['Error']['Message']
+            # These errors are related to the state machine itself, and
+            # should be 400 errors.
+            # Other ClientErrors, like invalid permissions, should be
+            # considered 500 errors.
             errors = [
                 'InvalidOutput',
                 'InvalidToken',
