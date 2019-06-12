@@ -18,23 +18,41 @@ be `POST`'d or `GET`'d, and will send that outcome on to Step Functions, complet
 
 # Test it out
 ```bash
-# set these values
-NAME=TODO_YOUR_NAME
-EMAIL=TODO_YOUR_EMAIL
+# *** Do this part if you are deploying from SAR ***
+
+# Visit https://serverlessrepo.aws.amazon.com/applications/arn:aws:serverlessrepo:us-east-2:866918431004:applications~sfn-callback-urls
+# and deploy the application. Note the stack name you used, and set it below.
+
+STACK_NAME=TODO_DEPLOYED_APP_STACK_NAME
+
+# *** Do this part if you are deploying from source ***
+
+# Set this value
 CODE_BUCKET=TODO_YOUR_S3_BUCKET
+
+STACK_NAME=SfnCallbackUrls
 
 sam build
 sam package --output-template-file packaged-template.yaml --s3-bucket $CODE_BUCKET
-sam deploy --template-file packaged-template.yaml --capabilities CAPABILITY_IAM --stack-name SfnCallbackUrls
+sam deploy --template-file packaged-template.yaml --capabilities CAPABILITY_IAM --stack-name $STACK_NAME
 
-FUNC=$(aws cloudformation describe-stacks --stack-name SfnCallbackUrls --query "Stacks[0].Outputs[?OutputKey=='Function'].OutputValue" --output text)
+# *** Now, let's get to it ***
 
+# Set these values
+NAME=TODO_YOUR_NAME
+EMAIL=TODO_YOUR_EMAIL
+
+# This gets the Lambda function we call for creating callback URLs
+FUNC=$(aws cloudformation describe-stacks --stack-name $STACK_NAME --query "Stacks[0].Outputs[?OutputKey=='Function'].OutputValue" --output text)
+
+# Deploy the example stack
 aws cloudformation deploy --template-file example/template.yaml --stack-name SfnCallbackUrlsExample --parameter-overrides Email=$EMAIL CreateUrlsFunction=$FUNC --capabilities CAPABILITY_IAM
 
 # Go to your email and confirm the SNS subscription
 
 STATE_MACHINE=$(aws cloudformation describe-stacks --stack-name SfnCallbackUrlsExample --query "Stacks[0].Outputs[?OutputKey=='StateMachine'].OutputValue" --output text)
 
+# Run the example state machine
 aws step-functions start-execution --state-machine-arn $STATE_MACHINE --input "{\"name\": \"$NAME\"}"
 
 # Now you will get an approve/reject email, followed by a confirmation of the same

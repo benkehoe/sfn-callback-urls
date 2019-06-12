@@ -65,10 +65,10 @@ Resources:
       RoleArn: !GetAtt StateMachineRole.Arn
       DefinitionString: !Sub |
         {
-            "StartAt": "WaitForTokenState",
+            "StartAt": "SendApprovalRequest",
             "Version": "1.0",
             "States": {
-                "WaitForTokenState": {
+                "SendApprovalRequest": {
                     "Type": "Task",
                     "Resource": "arn:aws:states:::lambda:invoke.waitForTaskToken",
                     "Parameters": {
@@ -120,7 +120,7 @@ Resources:
           import json, os, boto3
           def handler(event, context):
               print('Event:', json.dumps(event))
-              if event['state'] == 'WaitForTokenState':
+              if event['state'] == 'SendApprovalRequest':
                   input = {
                       "token": event['token'],
                       "actions": {
