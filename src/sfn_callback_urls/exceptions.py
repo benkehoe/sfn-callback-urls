@@ -12,6 +12,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import json
+
 class BaseError(Exception):
     TYPE = 'GenericError'
     
@@ -31,37 +33,46 @@ class RequestError(BaseError):
     """Base class for general client-caused 400 errors"""
     TYPE = 'RequestError'
 
-class ParametersDisabledError(RequestError):
+class DuplicateActionName(RequestError):
     pass
 
-class OutputFormattingError(RequestError):
+class ParametersDisabled(RequestError):
     pass
 
-class InvalidPayloadError(RequestError):
+class OutputFormatting(RequestError):
     pass
 
-class ExpiredPayloadError(RequestError):
+class InvalidPayload(RequestError):
     pass
 
-class EncryptionError(RequestError):
+class ExpiredPayload(RequestError):
     pass
 
-class DecryptionUnsupportedError(RequestError):
+class EncryptionFailed(RequestError):
     pass
 
-class EncryptionRequiredError(RequestError):
+class DecryptionUnsupported(RequestError):
     pass
 
-class MissingApiParametersError(RequestError):
+class EncryptionRequired(RequestError):
     pass
 
-class InvalidActionError(RequestError):
+class InvalidAction(RequestError):
     pass
 
-class InvalidDateError(RequestError):
+class InvalidDate(RequestError):
     pass
 
-class ActionMismatchedError(RequestError):
+class ActionMismatched(RequestError):
+    pass
+
+class PostActionDisabled(RequestError):
+    pass
+
+class PostAction(RequestError):
+    pass
+
+class InvalidPostActionBody(RequestError):
     pass
 
 class StepFunctionsError(BaseError):

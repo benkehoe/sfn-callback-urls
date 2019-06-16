@@ -147,12 +147,14 @@ get_request = lambda: {
 }
 
 get_success = lambda output: {
+    'name': 'foo_success',
     'type': 'success',
     'output': output,
 }
 
 def get_failure(error=None, cause=None):
     action = {
+        'name': 'foo_failure',
         'type': 'failure'
     }
     if error:
@@ -166,7 +168,7 @@ get_heartbeat = lambda: { 'type': 'heartbeat' }
 def get_event(actions,
         expiration=None,
         enable_output_parameters=None,
-        api=None):
+        base_url=None):
     event = {
         'token': 'asdf',
         'actions': actions,
@@ -178,8 +180,8 @@ def get_event(actions,
     if enable_output_parameters is not None:
         event['enable_output_parameters'] = enable_output_parameters
     
-    if api is not None:
-        event['api'] = api
+    if base_url is not None:
+        event['base_url'] = base_url
     
     return event
 
@@ -201,41 +203,62 @@ def test_action_schema():
         'type': 'success'
     })
 
-    assert_good({
+    assert_bad({
         'type': 'success',
         'output': 'foo'
     })
 
     assert_good({
+        'name': 'foo_1',
+        'type': 'success',
+        'output': 'foo'
+    })
+
+    assert_good({
+        'name': 'foo_1',
         'type': 'success',
         'output': {}
     })
     
+    assert_bad({
+        'type': 'failure'
+    })
+
     assert_good({
+        'name': '1_bar',
         'type': 'failure'
     })
 
     assert_bad({
+        'name': '1_bar',
         'type': 'failure',
         'error': {}
     })
     
     assert_good({
+        'name': '1_bar',
         'type': 'failure',
         'error': 'foo'
     })
 
     assert_bad({
+        'name': '1_bar',
         'type': 'failure',
         'cause': {}
     })
     
     assert_good({
+        'name': '1_bar',
         'type': 'failure',
         'cause': 'foo'
     })
 
+    assert_bad({
+        'type': 'heartbeat'
+    })
+
     assert_good({
+        'name': 'ekg',
         'type': 'heartbeat'
     })
 
@@ -258,44 +281,54 @@ def test_event_schema():
         'actions': {},
     })
 
+    assert_bad({
+        'token': 'foo',
+        'actions': [],
+    })
+
     assert_good({
         'token': 'foo',
-        'actions': {
-            'foo': {
+        'actions': [
+            {
+                'name': 'foo',
                 'type': 'heartbeat'
             },
-            'f': {
+            {
+                'name': 'f',
                 'type': 'success',
                 'output': {}
             }
-        }
+        ]
     })
 
     assert_bad({
         'token': 1,
-        'actions': {
-            'foo': {
+        'actions': [
+            {
+                'name': 'foo',
                 'type': 'heartbeat'
             }
-        }
+        ]
     })
 
     assert_bad({
         'token': 'foo',
-        'actions': {
-            '': {
+        'actions': [
+            {
+                'name': '',
                 'type': 'heartbeat'
             }
-        }
+        ]
     })
 
     assert_bad({
         'token': 'foo',
-        'actions': {
-            '$foo': {
+        'actions': [
+            {
+                'name': '$foo',
                 'type': 'heartbeat'
             }
-        }
+        ]
     })
 
 def test_wrong_method():

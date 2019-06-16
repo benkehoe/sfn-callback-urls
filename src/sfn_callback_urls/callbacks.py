@@ -16,7 +16,13 @@ import urllib
 import json
 import string
 
-from .exceptions import OutputFormattingError, InvalidPayloadError
+from .exceptions import (
+    OutputFormatting,
+    InvalidPayload,
+    PostActionDisabled,
+    PostAction,
+    InvalidPostActionBody
+)
 from .common import get_header, is_verbose
 
 ACTION_NAME_QUERY_PARAM = 'action'
@@ -25,11 +31,18 @@ PAYLOAD_QUERY_PARAM = 'data'
 
 CALLBACK_PATH = 'respond'
 
-def get_url(action_name, action_type, payload,
-        api_id,
-        stage_id,
-        region,
-        log_event={}):
+def get_api_gateway_url(api_id, stage_id, region):
+    url_template = 'https://{api_id}.execute-api.{region}.amazonaws.com/{stage_id}'
+
+    return url_template.format(
+        api_id=api_id,
+        region=region,
+        stage_id=stage_id
+    )
+
+def get_url(base_url, action_name, action_type, payload, log_event={}):
+    if base_url.endswith('/'):
+        base_url = base_url[:-1]
     
     query = urllib.parse.urlencode([
         (ACTION_NAME_QUERY_PARAM, action_name),
@@ -37,12 +50,10 @@ def get_url(action_name, action_type, payload,
         (PAYLOAD_QUERY_PARAM, payload)
     ])
 
-    url_template = 'https://{api_id}.execute-api.{region}.amazonaws.com/{stage_id}/{path}?{query}'
+    url_template = '{base_url}/{path}?{query}'
 
     return url_template.format(
-        api_id=api_id,
-        region=region,
-        stage_id=stage_id,
+        base_url=base_url,
         path=CALLBACK_PATH,
         query=query,
     )
@@ -55,7 +66,7 @@ def load_from_request(request):
     action_type = query_parameters.get(ACTION_TYPE_QUERY_PARAM)
 
     if PAYLOAD_QUERY_PARAM not in query_parameters:
-        raise InvalidPayloadError('Missing payload')
+        raise InvalidPayload('Missing payload')
     
     payload = query_parameters[PAYLOAD_QUERY_PARAM]
 
@@ -67,6 +78,33 @@ def load_from_request(request):
             parameters[k] = v
     
     return action_name, action_type, payload, parameters
+
+def load_post_action_body(request, log_event={}):
+    if request['httpMethod'] != 'POST':
+        raise PostAction('post actions must use POST')
+    
+    if get_header(request, 'content-type') == 'application/json':
+        try:
+            return json.loads(request['body'])
+        except json.JSONDecodeError as e:
+            raise InvalidPostActionBody(str(e))
+    else:
+        raise PostAction('post actions must use JSON')
+    #TODO: multipart/form-data
+
+def prepare_method_params(action, parameters, log_event={}):
+    action_type = action['type']
+    method_params = {}
+    if action_type == 'success':
+        output = action.get('output', {})
+        output = format_output(output, parameters)
+        method_params['output'] = json.dumps(output)
+    elif action_type == 'failure':
+        for key in ['error', 'cause']:
+            if key in action:
+                method_params[key] = format_output(action[key], parameters)
+    
+    return method_params
 
 def format_output(output, parameters):
     # Apply string templating to all strings contained within output (recursively)
@@ -86,7 +124,7 @@ def format_output(output, parameters):
         try:
             return string.Template(output).substitute(parameters)
         except (IndexError, KeyError) as e:
-            raise OutputFormattingError(f'Formatting the output with the parameters failed ({e})')
+            raise OutputFormatting(f'Formatting the output with the parameters failed ({e})')
     return output
 
 HTML_TEMPLATE = """<html>

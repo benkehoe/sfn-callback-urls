@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from .action import response_schema
+from .action import schema as action_schema
 
 # This looks a lot like a JWT, because that's what the original implementation
 # used. But since we're encrypting the payload anyway, there isn't much utility
@@ -21,19 +21,12 @@ from .action import response_schema
 
 skeleton = lambda: {
     'token': '<token from Step Functions>',
-    'iss': '<set to the Lambda function name>',
+    'iss': '<set to the Lambda function arn>',
     'iat': 0, # unix timestamp
     'tid': '', # transaction id
     'exp': 0, # expiration unix timestamp
-    'name': '<user-provided name>', # the user-provided action name
-    'act': '<success|failure|heartbeat>', # the action type, corresponding to Step Functions API call
-    'data': { # output specification for the task
-        # "output": {} # for success, this is required, and can be any JSON type
-        # "error": "<error code>" # for failure, this is optional
-        # "cause": "<error message>" # for failure, this is optional
-    }, 
-    'par': False, # optional, enable the caller to pass parameters for the output
-    'resp': {}, # optional, specify aspects of the HTTP response to the callback
+    'action': {}, # the action definition
+    'param': False, # optional, enable the caller to pass parameters for the output
 }
 
 schema = {
@@ -44,62 +37,10 @@ schema = {
         "tid": {"type": "string"},
         "exp": {"type": "number"},
         "token": {"type": "string"},
-        "name": {
-            "type": "string"
-        },
-        "act": {
-            "type": "string",
-            "enum": ["success", "failure", "heartbeat"]
-        },
-        "data": {
-            "type": "object"
-        },
-        "par": {
+        "action": action_schema,
+        "param": {
             "type": "boolean"
-        },
-        "resp": response_schema
-    },
-    "required": ["token", "name", "act", "data"],
-    "allOf": [
-        {
-            "if": {
-                "properties": { "act": { "const": "success" } }
-            },
-            "then": {
-                "properties": {
-                    "data": {
-                        "type": "object",
-                        "properties": {
-                            "output": {
-                                "type": "object"
-                            }
-                        },
-                        "required": ["output"]
-                    },
-                    
-                },
-                "required": ["data"],
-            }
-        },
-        {
-            "if": {
-                "properties": { "act": { "const": "failure" } }
-            },
-            "then": {
-                "properties": {
-                    "data": {
-                        "type": "object",
-                        "properties": {
-                            "error": {
-                                "type": "string"
-                            },
-                            "cause": {
-                                "type": "string"
-                            },
-                        }
-                    }
-                }
-            }
         }
-    ]
+    },
+    "required": ["token", "action"],
 }

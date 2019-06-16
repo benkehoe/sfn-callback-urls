@@ -31,16 +31,20 @@ response_schema = {
     }
 }
 
-schema = {
+_base_action_schema = lambda: {
     "type": "object",
     "properties": {
+        "name": {
+            "type": "string",
+            "pattern": "^\\w+$"
+        },
         "type": {
             "type": "string",
             "enum": ["success", "failure", "heartbeat"]
         },
         "response": response_schema
     },
-    "required": ["type"],
+    "required": ["name", "type"],
     "allOf": [
         {
             "if": {
@@ -52,7 +56,6 @@ schema = {
                 },
                 "required": ["output"]
             }
-            
         },
         {
             "if": {
@@ -71,3 +74,27 @@ schema = {
         }
     ]
 }
+
+_post_action_schema = _base_action_schema()
+_post_action_schema["properties"]["schema"] = {
+    
+}
+_post_action_schema["required"].append("schema")
+
+
+schema = _base_action_schema()
+schema["properties"]["type"]["enum"].append("post")
+schema["allOf"].append({
+    "if": {
+        "properties": { "type": { "const": "post" } }
+    },
+    "then": {
+        "properties": {
+            "outcomes": {
+                "type": "array",
+                "items": _post_action_schema
+            }
+        },
+        "required": ["outcomes"]
+    }
+})

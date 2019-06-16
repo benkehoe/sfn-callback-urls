@@ -89,7 +89,7 @@ def drain(test_stack_name, session):
     
     print('Done')
 
-def run(api_url, test_stack_name, session):
+def run(api_url, test_stack_name, session, enable_output_parameters=False):
     # get state machine, queue from stack
     print(f"Getting state machine ARN and Queue from stack {test_stack_name}")
     state_machine_arn, queue = get_sfn_arn_and_queue_resource(test_stack_name, session)
@@ -149,26 +149,29 @@ def run(api_url, test_stack_name, session):
     url = f'{api_url}/urls'
     body = {
             'token': token,
-            'actions': {
-                'good': {
+            'actions': [
+                {
+                    'name': 'good',
                     'type': 'success',
                     'output': output,
                 },
-                'bad': {
+                {
+                    'name': 'bad',
                     'type': 'failure',
                     'error': correlation_id,
                     'response': {
                         'html': 'Hello $hello'
                     }
                 },
-                'hb': {
+                {
+                    'name': 'hb',
                     'type': 'heartbeat',
                     'response': {
                         'redirect': 'https://google.com'
                     }
                 }
-            },
-            "enable_output_parameters": True
+            ],
+            "enable_output_parameters": enable_output_parameters
         }
 
     print(f'Getting URLs: {url}')

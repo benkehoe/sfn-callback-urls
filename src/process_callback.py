@@ -27,14 +27,31 @@ import botocore.exceptions
 import aws_encryption_sdk
 import jsonschema
 
-from sfn_callback_urls.callbacks import load_from_request, format_output, format_response
-from sfn_callback_urls.payload import decode_payload, validate_payload_schema, validate_payload_expiration
-from sfn_callback_urls.common import send_log_event, get_force_disable_parameters, is_verbose
+from sfn_callback_urls.callbacks import (
+    load_from_request,
+    load_post_action_body,
+    prepare_method_params,
+    format_response
+)
+from sfn_callback_urls.payload import (
+    decode_payload,
+    validate_payload_schema,
+    validate_payload_expiration
+)
+from sfn_callback_urls.common import (
+    send_log_event,
+    get_force_disable_parameters,
+    get_force_disable_post_action,
+    is_verbose,
+    get_header
+)
 
 from sfn_callback_urls.exceptions import (
     BaseError,
-    ActionMismatchedError,
-    ParametersDisabledError,
+    ActionMismatched,
+    ParametersDisabled,
+    PostActionDisabled,
+    InvalidPostActionBody,
     StepFunctionsError
 )
 
@@ -88,14 +105,14 @@ def handler(request, context):
         # versions differ from the payload, something funny is going on and we reject
         # the request. But if they are absent, it's not a problem.
 
-        action_name_in_payload = payload['name']
+        action_name_in_payload = payload['action']['name']
         if action_name_from_url and action_name_from_url != action_name_in_payload:
-            raise ActionMismatchedError(f'The action name says {action_name_from_url} in the url but {action_name_in_payload} in the payload')
+            raise ActionMismatched(f'The action name says {action_name_from_url} in the url but {action_name_in_payload} in the payload')
         action_name = action_name_in_payload
 
-        action_type_in_payload = payload['act']
+        action_type_in_payload = payload['action']['type']
         if action_type_from_url and action_type_from_url != action_type_in_payload:
-            raise ActionMismatchedError(f'The action type says {action_type_in_payload} in the url but {action_type_in_payload} in the payload')
+            raise ActionMismatched(f'The action type says {action_type_in_payload} in the url but {action_type_in_payload} in the payload')
         action_type = action_type_in_payload
 
         log_event['action'] = {
@@ -111,33 +128,61 @@ def handler(request, context):
         # that has parameters enabled, even though it was presumably
         # valid at creation time to have parameters enabled.
         force_disable_parameters = get_force_disable_parameters()
-        use_parameters = payload.get('par', False)
+        use_parameters = payload.get('param', False)
         if use_parameters and force_disable_parameters:
-            raise ParametersDisabledError('Parameters are disabled')
+            raise ParametersDisabled('Parameters are disabled')
         if not use_parameters:
             parameters = None
         
-        action_data = payload.get('data', {})
+        action = payload['action']
 
-        response_spec = payload.get('resp', {})
+        response_spec = action.get('response', {})
 
-        return_value = format_response(200, response, request, response_spec, parameters, log_event)
+        outcome_name = action_name
+        outcome_type = action_type
 
-        method = f'send_task_{action_type}'
-
-        method_params = {
-            'taskToken': payload['token']
-        }
-
-        if action_type == 'success':
-            output = action_data.get('output', {})
-            output = format_output(output, parameters)
-            method_params['output'] = json.dumps(output)
-        elif action_type == 'failure':
-            for key in ['error', 'cause']:
-                if key in action_data:
-                    method_params[key] = action_data[key]
+        if action_type == 'post':
+            if get_force_disable_parameters():
+                raise PostActionDisabled('Post actions are disabled')
+            body = load_post_action_body(request, log_event)
+            outcomes = action['outcomes']
+            
+            log_event['post_outcome_names'] = [o['name'] for o in outcomes]
+            log_event['post_outcome_types'] = [o['type'] for o in outcomes]
+            log_event['post_outcomes_num'] = len(outcomes)
+            
+            for outcome_index, outcome in enumerate(outcomes):
+                outcome_body_schema = outcome['schema']
+                try:
+                    jsonschema.validate(body, outcome_body_schema)
+                except jsonschema.ValidationError as e:
+                    continue
+                
+                outcome_name = outcome_name + '.' + outcome['name']
+                outcome_type = outcome['type']
+                
+                log_event['post_outcome_index'] = outcome_index
+                
+                if 'response' in outcome:
+                    response_spec = outcome['response']
+                
+                outcome_action_data = {}
+                for key in ['output', 'error', 'cause']:
+                    if key in outcome:
+                        path = outcome[key]
+                        outcome_action_data[key] = body[path] #TODO: JSON path
+                method_params = prepare_method_params(outcome, parameters, log_event=log_event)    
+            else:
+                raise InvalidPostActionBody('Body does not match any outcome')
+        else:
+            method_params = prepare_method_params(action, parameters, log_event=log_event)
         
+        log_event['outcome_name'] = outcome_name
+        log_event['outcome_type'] = outcome_type
+
+        method = f'send_task_{outcome_type}'
+        method_params['taskToken'] = payload['token']
+
         try:
             sfn_call_start = time.perf_counter()
             sfn_response = getattr(STEP_FUNCTIONS_CLIENT, method)(**method_params)
@@ -159,6 +204,8 @@ def handler(request, context):
             if error_code in errors:
                 raise StepFunctionsError(f'{error_code}:{error_msg}')
             raise
+
+        return_value = format_response(200, response, request, response_spec, parameters, log_event)
 
         send_log_event(log_event)
 

@@ -8,6 +8,7 @@ python-dateutil = "*"
 "boto3" = "*"
 aws-encryption-sdk = "*"
 jsonschema = ">=3.0.1"
+jsonpath-rw = "*"
 
 [dev-packages]
 pylint = "*"
