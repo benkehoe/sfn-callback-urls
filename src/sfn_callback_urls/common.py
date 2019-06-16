@@ -34,8 +34,8 @@ def get_force_disable_parameters():
     """Check for the env var that we'll use to prevent parameterizing the callback fields"""
     return _get_disable_param(DISABLE_PARAMETERS_ENV_VAR_NAME)
 
-DISABLE_POST_ACTION_ENV_VAR_NAME = 'DISABLE_POST_ACTION'
-def get_force_disable_post_action():
+DISABLE_POST_ACTION_ENV_VAR_NAME = 'DISABLE_POST_ACTIONS'
+def get_disable_post_actions():
     """Check for the env var that we'll use to prevent post actions"""
     return _get_disable_param(DISABLE_POST_ACTION_ENV_VAR_NAME)
 

@@ -17,10 +17,9 @@ import json
 import string
 
 from .exceptions import (
+    ReturnHttpResponse,
     OutputFormatting,
     InvalidPayload,
-    PostActionDisabled,
-    PostAction,
     InvalidPostActionBody
 )
 from .common import get_header, is_verbose
@@ -78,19 +77,6 @@ def load_from_request(request):
             parameters[k] = v
     
     return action_name, action_type, payload, parameters
-
-def load_post_action_body(request, log_event={}):
-    if request['httpMethod'] != 'POST':
-        raise PostAction('post actions must use POST')
-    
-    if get_header(request, 'content-type') == 'application/json':
-        try:
-            return json.loads(request['body'])
-        except json.JSONDecodeError as e:
-            raise InvalidPostActionBody(str(e))
-    else:
-        raise PostAction('post actions must use JSON')
-    #TODO: multipart/form-data
 
 def prepare_method_params(action, parameters, log_event={}):
     action_type = action['type']

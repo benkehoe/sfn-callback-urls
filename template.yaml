@@ -26,7 +26,7 @@ Metadata:
     LicenseUrl: LICENSE
     ReadmeUrl: README.md
     HomePageUrl: https://github.com/benkehoe/sfn-callback-urls
-    SemanticVersion: 0.1.0
+    SemanticVersion: 0.2.0
     SourceCodeUrl: https://github.com/benkehoe/sfn-callback-urls
 Parameters:
   UseEncryption:
@@ -42,6 +42,13 @@ Parameters:
     Default: 'NONE'
   DisableOutputParameters:
     Description: Disallow the use of query parameters to customize the result of callbacks
+    Type: String
+    AllowedValues:
+      - "true"
+      - "false"
+    Default: "true"
+  DisablePostActions:
+    Description: Disallow the use of post actions, which pass the callback request body to Step Functions
     Type: String
     AllowedValues:
       - "true"
@@ -199,6 +206,7 @@ Resources:
       Environment:
         Variables:
           DISABLE_OUTPUT_PARAMETERS: !Ref DisableOutputParameters
+          DISABLE_POST_ACTIONS: !Ref DisablePostActions
           VERBOSE: "false"
           KEY_ID: 
             "Fn::If":
@@ -220,6 +228,7 @@ Resources:
       Environment:
         Variables:
           DISABLE_OUTPUT_PARAMETERS: !Ref DisableOutputParameters
+          DISABLE_POST_ACTIONS: !Ref DisablePostActions
           VERBOSE: "false"
           API_ID: !Ref Api
           STAGE: !Ref ApiStage
@@ -296,6 +305,7 @@ Resources:
       Environment:
         Variables:
           DISABLE_OUTPUT_PARAMETERS: !Ref DisableOutputParameters
+          DISABLE_POST_ACTIONS: !Ref DisablePostActions
           VERBOSE: "false"
           KEY_ID:
             "Fn::If":

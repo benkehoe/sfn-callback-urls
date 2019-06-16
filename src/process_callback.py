@@ -29,7 +29,6 @@ import jsonschema
 
 from sfn_callback_urls.callbacks import (
     load_from_request,
-    load_post_action_body,
     prepare_method_params,
     format_response
 )
@@ -38,19 +37,24 @@ from sfn_callback_urls.payload import (
     validate_payload_schema,
     validate_payload_expiration
 )
+from sfn_callback_urls.post_actions import (
+    load_post_action_body,
+    process_post_action
+)
 from sfn_callback_urls.common import (
     send_log_event,
     get_force_disable_parameters,
-    get_force_disable_post_action,
+    get_disable_post_actions,
     is_verbose,
     get_header
 )
 
 from sfn_callback_urls.exceptions import (
+    ReturnHttpResponse,
     BaseError,
     ActionMismatched,
     ParametersDisabled,
-    PostActionDisabled,
+    PostActionsDisabled,
     InvalidPostActionBody,
     StepFunctionsError
 )
@@ -142,38 +146,14 @@ def handler(request, context):
         outcome_type = action_type
 
         if action_type == 'post':
-            if get_force_disable_parameters():
-                raise PostActionDisabled('Post actions are disabled')
-            body = load_post_action_body(request, log_event)
-            outcomes = action['outcomes']
-            
-            log_event['post_outcome_names'] = [o['name'] for o in outcomes]
-            log_event['post_outcome_types'] = [o['type'] for o in outcomes]
-            log_event['post_outcomes_num'] = len(outcomes)
-            
-            for outcome_index, outcome in enumerate(outcomes):
-                outcome_body_schema = outcome['schema']
-                try:
-                    jsonschema.validate(body, outcome_body_schema)
-                except jsonschema.ValidationError as e:
-                    continue
-                
-                outcome_name = outcome_name + '.' + outcome['name']
-                outcome_type = outcome['type']
-                
-                log_event['post_outcome_index'] = outcome_index
-                
-                if 'response' in outcome:
-                    response_spec = outcome['response']
-                
-                outcome_action_data = {}
-                for key in ['output', 'error', 'cause']:
-                    if key in outcome:
-                        path = outcome[key]
-                        outcome_action_data[key] = body[path] #TODO: JSON path
-                method_params = prepare_method_params(outcome, parameters, log_event=log_event)    
-            else:
-                raise InvalidPostActionBody('Body does not match any outcome')
+            (
+                outcome_name,
+                outcome_type,
+                outcome_response_spec,
+                method_params
+            ) = process_post_action(action, request, parameters, log_event)
+            if outcome_response_spec is not None:
+                response_spec = outcome_response_spec
         else:
             method_params = prepare_method_params(action, parameters, log_event=log_event)
         
@@ -212,6 +192,17 @@ def handler(request, context):
         if is_verbose:
             print(f'Response: {json.dumps(return_value)}')
 
+        return return_value
+    except ReturnHttpResponse as e:
+        log_event['error'] = {
+            'type': e.TYPE,
+            'error': e.code(),
+            'message': e.message(),
+        }
+        return_value = e.get_response()
+        send_log_event(log_event)
+        if is_verbose:
+            print(f'Response: {json.dumps(return_value)}')
         return return_value
     except BaseError as e:
         response = OrderedDict((

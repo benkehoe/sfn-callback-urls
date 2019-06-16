@@ -66,10 +66,10 @@ class InvalidDate(RequestError):
 class ActionMismatched(RequestError):
     pass
 
-class PostActionDisabled(RequestError):
+class PostActionsDisabled(RequestError):
     pass
 
-class PostAction(RequestError):
+class InvalidPostActionOutcome(RequestError):
     pass
 
 class InvalidPostActionBody(RequestError):
@@ -78,3 +78,30 @@ class InvalidPostActionBody(RequestError):
 class StepFunctionsError(BaseError):
     """Still a 400 error, but resulting from the call to Step Functions"""
     TYPE = 'StepFunctionsError'
+
+class ReturnHttpResponse(Exception):
+    """When processing callbacks, sometimes a direct HTTP response is warranted"""
+    TYPE = RequestError.TYPE
+
+    def __init__(self, code, message, status_code, headers={}, body=None):
+        self._code = code
+        self._message = message
+        self.status_code = status_code
+        self.headers = headers
+        self.body = body
+    
+    def get_response(self):
+        body = ''
+        if body is not None:
+            body = body if isinstance(body, str) else json.dumps(body)
+        return {
+            'statusCode': self.status_code,
+            'headers': self.headers,
+            'body': body
+        }
+
+    def code(self):
+        return self._code
+    
+    def message(self):
+        return self._message

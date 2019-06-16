@@ -29,13 +29,15 @@ import jsonschema
 
 from sfn_callback_urls.payload import PayloadBuilder, encode_payload
 from sfn_callback_urls.callbacks import get_api_gateway_url, get_url
-from sfn_callback_urls.common import send_log_event, get_header, is_verbose
+from sfn_callback_urls.common import send_log_event, get_header, is_verbose, get_disable_post_actions
+from sfn_callback_urls.post_actions import validate_post_action
 
 from sfn_callback_urls.exceptions import (
     BaseError,
     DuplicateActionName,
     InvalidAction,
-    InvalidDate
+    InvalidDate,
+    PostActionsDisabled
 )
 
 from sfn_callback_urls.schemas.create_urls import create_urls_input_schema
@@ -195,9 +197,12 @@ def process_event(event, context, default_api_info, response_formatter):
         for action in event['actions']:
             action_name = action['name']
             action_type = action['type']
-            
+
             if action_name in actions_for_log:
                 raise DuplicateActionName(f'Action {action_name} provided more than once')
+
+            if action_type == 'post':
+                validate_post_action(action)
 
             actions_for_log[action_name] = action_type
 
