@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from .action import schema as _ACTION_SCHEMA
+from .action import action_schema
 
 skeleton = lambda: {
     "token": "<from Step Functions>",
@@ -48,7 +48,7 @@ skeleton = lambda: {
     "enable_output_parameters": False,
 }
 
-schema = {
+create_urls_input_schema = {
     "type": "object",
     "properties": {
         "token": {
@@ -56,7 +56,7 @@ schema = {
         },
         "actions": {
             "type": "array",
-            "items": _ACTION_SCHEMA,
+            "items": action_schema,
             "minItems": 1,
         },
         "expiration": {

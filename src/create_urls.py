@@ -38,7 +38,7 @@ from sfn_callback_urls.exceptions import (
     InvalidDate
 )
 
-from sfn_callback_urls.schemas.create_urls import schema as CREATE_URL_EVENT_SCHEMA
+from sfn_callback_urls.schemas.create_urls import create_urls_input_schema
 
 # See schemas.create_urls for example event
 
@@ -126,7 +126,7 @@ def process_event(event, context, default_api_info, response_formatter):
         print(f'Input: {event}')
         
     try:
-        jsonschema.validate(event, CREATE_URL_EVENT_SCHEMA)
+        jsonschema.validate(event, create_urls_input_schema)
     except jsonschema.ValidationError as e:
         return response_formatter(400, {}, {
                     'error': 'InvalidJSON',
@@ -186,9 +186,10 @@ def process_event(event, context, default_api_info, response_formatter):
             response['expiration'] = expiration.isoformat()
         
         payload_builder = PayloadBuilder(transaction_id, timestamp, event['token'],
-                enable_output_parameters=event.get('enable_output_parameters'),
-                expiration=expiration,
-                issuer=context.invoked_function_arn)
+            enable_output_parameters=event.get('enable_output_parameters'),
+            expiration=expiration,
+            issuer=getattr(context, 'invoked_function_arn', None)
+        )
 
         actions_for_log = {}
         for action in event['actions']:

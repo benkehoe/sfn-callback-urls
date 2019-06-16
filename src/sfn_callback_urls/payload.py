@@ -32,7 +32,7 @@ from .exceptions import (
     EncryptionRequired
 )
 
-from .schemas.payload import schema as PAYLOAD_SCHEMA
+from .schemas.payload import payload_schema
 
 class PayloadBuilder:
     def __init__(self,
@@ -98,7 +98,7 @@ def encode_payload(payload, master_key_provider):
 
 def validate_payload_schema(payload):
     try:
-        jsonschema.validate(payload, PAYLOAD_SCHEMA)
+        jsonschema.validate(payload, payload_schema)
     except jsonschema.ValidationError as e:
         raise InvalidPayload(f'Failed schema validation ({e})')
 

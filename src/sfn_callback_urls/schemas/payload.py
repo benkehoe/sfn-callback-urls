@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from .action import schema as action_schema
+from .action import action_schema
 
 # This looks a lot like a JWT, because that's what the original implementation
 # used. But since we're encrypting the payload anyway, there isn't much utility
@@ -29,7 +29,7 @@ skeleton = lambda: {
     'param': False, # optional, enable the caller to pass parameters for the output
 }
 
-schema = {
+payload_schema = {
     "type": "object",
     "properties": {
         "iss": {"type": "string"},

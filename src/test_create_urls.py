@@ -19,7 +19,8 @@ import json
 import jsonschema
 
 import create_urls
-from sfn_callback_urls.schemas.action import schema as ACTION_SCHEMA
+from sfn_callback_urls.schemas.action import action_schema
+from sfn_callback_urls.schemas.create_urls import create_urls_input_schema
 
 def assert_dicts_equal(a, b):
     assert json.dumps(a, sort_keys=True) == json.dumps(b, sort_keys=True)
@@ -146,15 +147,15 @@ get_request = lambda: {
     "isBase64Encoded": False
 }
 
-get_success = lambda output: {
-    'name': 'foo_success',
+get_success = lambda name, output: {
+    'name': name,
     'type': 'success',
     'output': output,
 }
 
-def get_failure(error=None, cause=None):
+def get_failure(name, error=None, cause=None):
     action = {
-        'name': 'foo_failure',
+        'name': name,
         'type': 'failure'
     }
     if error:
@@ -163,7 +164,10 @@ def get_failure(error=None, cause=None):
         action['cause'] = cause
     return action
 
-get_heartbeat = lambda: { 'type': 'heartbeat' }
+get_heartbeat = lambda name: {
+    'name': name,
+    'type': 'heartbeat'
+}
 
 def get_event(actions,
         expiration=None,
@@ -187,11 +191,11 @@ def get_event(actions,
 
 def test_action_schema():
     def assert_good(obj):
-        jsonschema.validate(obj, ACTION_SCHEMA)
+        jsonschema.validate(obj, action_schema)
     
     def assert_bad(obj):
         with pytest.raises(jsonschema.ValidationError):
-            jsonschema.validate(obj, ACTION_SCHEMA)
+            jsonschema.validate(obj, action_schema)
 
     assert_bad({})
 
@@ -264,11 +268,11 @@ def test_action_schema():
 
 def test_event_schema():
     def assert_good(obj):
-        jsonschema.validate(obj, create_urls.CREATE_URL_EVENT_SCHEMA)
+        jsonschema.validate(obj, create_urls_input_schema)
     
     def assert_bad(obj):
         with pytest.raises(jsonschema.ValidationError):
-            jsonschema.validate(obj, create_urls.CREATE_URL_EVENT_SCHEMA)
+            jsonschema.validate(obj, create_urls_input_schema)
     
     assert_bad({})
 
@@ -384,29 +388,30 @@ def test_basic_request():
     req = get_request()
 
     req['body'] = json.dumps(
-        get_event(actions={
-            'foo': get_success({'spam': 'eggs'}),
-            'bar': get_failure(),
-            'baz': get_heartbeat()
-        })
+        get_event(actions=[
+            get_success('foo', {'spam': 'eggs'}),
+            get_failure('bar'),
+            get_heartbeat('baz')
+        ])
     )
 
     resp = create_urls.api_handler(req, None)
     assert resp['statusCode'] == 200
 
     body = json.loads(resp['body'])
-
+    assert 'urls' in body
     assert len(body['urls']) == 3
 
 def test_basic_event(monkeypatch):
     monkeypatch.setenv('API_ID', 'gy415nuibc')
     monkeypatch.setenv('STAGE', 'testStage')
     
-    event = get_event(actions={
-        'foo': get_success({'spam': 'eggs'}),
-        'bar': get_failure(),
-        'baz': get_heartbeat()
-    })
+    event = get_event(actions=[
+        get_success('foo', {'spam': 'eggs'}),
+        get_failure('bar'),
+        get_heartbeat('baz')
+    ])
 
     resp = create_urls.direct_handler(event, None)
+    assert 'urls' in resp
     assert len(resp['urls']) == 3
