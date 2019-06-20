@@ -66,7 +66,9 @@ class PayloadBuilder:
         force_disable_parameters = get_force_disable_parameters()
         log_event['force_disable_parameters'] = force_disable_parameters
         if self.enable_output_parameters:
-            if force_disable_parameters:
+            if action['type'] == 'post':
+                pass # POST actions are parameterized by the POST body
+            elif force_disable_parameters:
                 log_event['enable_parameter_conflict'] = True
                 raise ParametersDisabled('Parameters are disabled')
             else:

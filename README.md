@@ -237,3 +237,89 @@ The JSON response on error:
     "message": "<error description>"
 }
 ```
+
+## POST actions
+
+If you'd like to use the body of a POST callback to send output for your task, for example with a webhook,
+you can do this with `post` actions. A post action has a non-empty list of *outcomes*, which use the same form as
+actions with a few extra fields. Each outcome has a *name* and a *type*, where the type is one of
+`success`, `failure`, or `heartbeat`.
+
+Each outcome has a *schema*, which must be a [JSON Schema](https://json-schema.org/) that will be evaluated 
+against the POST body. The first outcome whose schema validates against the body will used. If no schema
+matches the POST body, the callback results in an error.
+
+Like in an action, a `success` outcome can include an `output` field, and a `failure` outcome can have
+`error` and `cause`; these are fixed values. To use the entire body of the request as the output for 
+a `success` outcome, use `"output_body": true` in your outcome.
+To select information from the request body, you can use `output_path` to specify a
+[JSONPath](https://github.com/kennknowles/python-jsonpath-rw#jsonpath-syntax). Because JSONPath expressions
+can return multiple values, the output will *always* be an array; if you expect your expression to return a
+single object, you must select it from the array in your state machine. Similarly, you can use `error_path`
+and `cause_path`; if these return paths return a single string, it will be used, otherwise the resulting
+JSON array of matches will be stringified.
+
+Outcomes can contain responses. POST actions disable output parameters, even if the create URLs call
+requests that they are enabled (other actions in such a call will have them enabled).
+
+A sample request to create a POST action URL looks the following:
+
+```json5
+{
+    "token": "<the token from Step Functions>", // required
+    "actions": [ // you must provide at least one action
+        {
+            "name": "<a name for this action>",
+            "type": "post",
+            "outcomes": [
+                {
+                    "name": "<a name for this happy outcome>",
+                    "type": "success",
+                    "schema": { // require an object that looks like {"result": "good"}
+                        "type": "object",
+                        "properties": {
+                            "result": {
+                                "const": "good"
+                            }
+                        },
+                        "required": [ "result" ]
+                    },
+                    "output_body": true
+                },
+                {
+                    "name": "<a name for this sad outcome",
+                    "type": "failure",
+                    "schema": { // require an object that looks like {"result": "bad", "reason": "..."}
+                        "type": "object",
+                        "properties": {
+                            "result": {
+                                "const": "bad"
+                            },
+                            "reason": {
+                                "type": "string"
+                            }
+                        },
+                        "required": [ "result", "reason" ]
+                    },
+                    "error_path": "$.reason"
+                }
+            ]
+        },
+        { // can have other actions in addition to POST actions
+            "name": "<name2>",
+            "type": "success",
+            "output": "<a different output>"
+        }
+    ]
+}
+```
+
+This feature is disabled by default due to the security considerations described below; you have to set
+the `EnablePostActions` stack parameter to `true`. If `EnablePostActions` is changed back to `false`,
+any previously-created POST action callbacks will be now rejected.
+
+### POST action security
+
+POST actions allow arbitrary output to be passed into an unauthenticated endpoint, and are therefore
+disabled by default. Users are required to provide a JSON schema to validate the body, but this can be
+the empty schema.

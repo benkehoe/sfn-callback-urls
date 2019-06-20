@@ -638,3 +638,55 @@ def test_post_action_output_path(state_machine_execution, resources, session, dr
     ]
 
     assert_dicts_equal(json.loads(test_output.step_functions_response['output']), expected_output)
+
+def test_post_action_error_path(state_machine_execution, resources, session, drain):
+    action_name = uuid.uuid4().hex
+    schema = {
+    }
+    actions = [
+        Actions.post(action_name, [
+            Actions.post.Outcomes.failure('bad', schema, ('error_path', '$.foo'))
+        ])
+    ]
+
+    post_body = {
+        "foo": "bar"
+    }
+
+    test_output = _run_test(
+        state_machine_execution, resources, session,
+        actions=actions,
+        post_body=post_body,
+    )
+
+    expected_error_value = "bar"
+
+    #TODO: validate error value
+
+def test_post_action_error_path_stringify(state_machine_execution, resources, session, drain):
+    action_name = uuid.uuid4().hex
+    schema = {
+    }
+    actions = [
+        Actions.post(action_name, [
+            Actions.post.Outcomes.failure('bad', schema, ('error_path', '$.foo'))
+        ])
+    ]
+
+    post_body = {
+        "foo": {
+            "bar": "baz"
+        }
+    }
+
+    test_output = _run_test(
+        state_machine_execution, resources, session,
+        actions=actions,
+        post_body=post_body
+    )
+
+    expected_error_value = json.dumps([
+        {"bar": "baz"}
+    ])
+
+    #TODO: validate error value
