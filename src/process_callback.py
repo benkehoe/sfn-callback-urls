@@ -69,7 +69,7 @@ if 'KEY_ID' in os.environ:
     )
 
 def handler(request, context):
-    if is_verbose:
+    if is_verbose():
         print(f'Request: {json.dumps(request)}')
 
     timestamp = datetime.datetime.now()
@@ -95,7 +95,7 @@ def handler(request, context):
 
         validate_payload_schema(payload)
 
-        if is_verbose:
+        if is_verbose():
             print(f'Payload: {json.dumps(payload)}')
         
         # use the same transaction id given out in the create urls call
@@ -163,6 +163,9 @@ def handler(request, context):
         log_event['outcome_name'] = outcome_name
         log_event['outcome_type'] = outcome_type
 
+        if is_verbose():
+            print(f'Input for {outcome_type}: {json.dumps(method_params)}')
+
         method = f'send_task_{outcome_type}'
         method_params['taskToken'] = payload['token']
 
@@ -192,7 +195,7 @@ def handler(request, context):
 
         send_log_event(log_event)
 
-        if is_verbose:
+        if is_verbose():
             print(f'Response: {json.dumps(return_value)}')
 
         return return_value
@@ -204,7 +207,7 @@ def handler(request, context):
         }
         return_value = e.get_response()
         send_log_event(log_event)
-        if is_verbose:
+        if is_verbose():
             print(f'Response: {json.dumps(return_value)}')
         return return_value
     except BaseError as e:
@@ -219,7 +222,7 @@ def handler(request, context):
         }
         return_value = format_response(400, response, request, {}, None, log_event)
         send_log_event(log_event)
-        if is_verbose:
+        if is_verbose():
             print(f'Response: {json.dumps(return_value)}')
         return return_value
     except Exception as e:
@@ -236,6 +239,6 @@ def handler(request, context):
         }
         return_value = format_response(500, response, request, {}, None, log_event)
         send_log_event(log_event)
-        if is_verbose:
+        if is_verbose():
             print(f'Response: {json.dumps(return_value)}')
         return return_value

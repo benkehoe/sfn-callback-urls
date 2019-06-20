@@ -2,14 +2,16 @@ import json
 
 import jsonschema
 import jsonschema.validators
+import jsonpath_rw
 
-from .common import get_header, get_disable_post_actions
+from .common import get_header, get_disable_post_actions, is_verbose
 from .callbacks import prepare_method_params
 
 from .exceptions import (
     PostActionsDisabled,
     InvalidPostActionOutcome,
     InvalidPostActionBody,
+    InvalidJsonPath,
     ReturnHttpResponse
 )
 
@@ -28,7 +30,10 @@ def validate_post_action(action):
         
         for key in ['output_path', 'error_path', 'cause_path']:
             if key in outcome:
-                pass #TODO: JSONPath
+                try:
+                    jsonpath_rw.parse(outcome[key])
+                except Exception as e:
+                    raise InvalidJsonPath(f'Invalid JSONPath: {str(e)}')
 
 def load_post_action_body(request, log_event={}):
     if request['httpMethod'] != 'POST':
@@ -87,14 +92,37 @@ def _process_post_action(action, body, parameters, log_event={}):
         response_spec = outcome.get('response')
 
         if outcome.get('output_body', False):
+            log_event['outcome_body'] = True
             outcome['output'] = body
+        elif 'output_path' in outcome:
+            if body is None: # jsonpath_rw doesn't seem to handle this well
+                log_event['body_null'] = True
+                outcome['output'] = None
+            else:
+                try:
+                    path = jsonpath_rw.parse(outcome['output_path'])
+                except Exception as e:
+                    raise InvalidJsonPath(f'Invalid JSONPath: {str(e)}')
+                
+                log_event['output_path'] = outcome['output_path']
+
+                outcome['output'] = [v.value for v in path.find(body)]
         
-        # TODO: JSONPath
-        # for key in ['output', 'error', 'cause']:
-        #     path_key = f'{key}_path'
-        #     if path_key in outcome:
-        #         path = outcome[path_key]
-        #         outcome[key] = jsonpath(body, path)
+        for key in ['error', 'cause']:
+            path_key = f'{key}_path'
+            if path_key in outcome:
+                try:
+                    path = jsonpath_rw.parse(outcome[path_key])
+                except Exception as e:
+                    raise InvalidJsonPath(f'Invalid JSONPath: {str(e)}')
+                value = [v.value for v in path.find(body)]
+                if len(value) == 0:
+                    continue
+                elif len(value) > 1 or not isinstance(value[0], str):
+                    value = json.dumps(value)
+                else:
+                    value = value[0]
+                outcome[key] = value
         
         method_params = prepare_method_params(outcome, parameters, log_event=log_event)
         break
@@ -113,5 +141,8 @@ def process_post_action(action, request, parameters, log_event={}):
         raise PostActionsDisabled('Post actions are disabled')
     
     body = load_post_action_body(request, log_event)
+
+    if is_verbose():
+        print(f'Post body: {json.dumps(body)}')
     
     return _process_post_action(action, body, parameters, log_event=log_event)

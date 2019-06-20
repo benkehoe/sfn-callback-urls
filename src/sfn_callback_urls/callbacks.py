@@ -127,7 +127,7 @@ Details:
 """
 
 def format_response(status_code, response, request, response_spec, parameters, log_event={}):
-    if is_verbose:
+    if is_verbose():
         print(f'Response spec: {json.dumps(response_spec)}')
     if 'redirect' in response_spec:
         log_event['redirect'] = response_spec['redirect']

@@ -70,7 +70,7 @@ allows you to inspect the payload nor modify it before using it.
 KMS key, you can put the key ARN in the `EncryptionKeyArn` stack parameter, and it will use that instead of 
 creating one.
 
-If you want to disable encryption entirely, you can set the `EnableEncryption` stack parameter to `false`.
+If you want to disable encryption entirely, you can set the `DisableEncryption` stack parameter to `true`.
 The consequence of disabling encryption is that the contents of a callback URL, including the token and the output you
 want to send to the state machine, are inspectable. Additionally, somebody who has gotten a token they should not have
 could construct a callback URL use it, and since the callback are unauthenticated this would constitute a privilege
@@ -174,10 +174,10 @@ if a callback is made after then, it will be rejected.
 
 If you've got a lot of different potential successful outputs, you may find it easier to parameterize your callbacks.
 This feature is disabled by default due to the security considerations described below; you have to set
-the `DisableOutputParameters` stack parameter to `false`. Then, you must also opt-in when creating URLs by setting 
+the `EnableOutputParameters` stack parameter to `true`. Then, you must also opt-in when creating URLs by setting 
 the `enable_output_parameters` field to `true` in your request. Any URLs created without `enable_output_parameters`
-set to `true` will not use parameterized output when the callbacks are processed. If `DisableOutputParameters` is
-changed back to `true`, any previously-created callbacks with parameters enabled will be now rejected.
+set to `true` will not use parameterized output when the callbacks are processed. If `EnableOutputParameters` is
+changed back to `false`, any previously-created callbacks with parameters enabled will be now rejected.
 
 Once set, any strings in the `output` field for a `success` action, the `error` and `cause` fields for a
 `failure` action, and all the strings in the `response` object are passed through the Python 

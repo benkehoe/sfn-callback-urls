@@ -29,38 +29,51 @@ Metadata:
     SemanticVersion: 0.2.0
     SourceCodeUrl: https://github.com/benkehoe/sfn-callback-urls
 Parameters:
-  UseEncryption:
-    Description: Enable or disable encryption for callback payloads
+  DisableEncryption:
+    Description: Disable encryption for callback payloads
     Type: String
     AllowedValues:
       - "true"
       - "false"
-    Default: "true"
+    Default: "false"
   EncryptionKeyArn:
     Description: If encryption is enabled, set this to use your own KMS key, or set to NONE to create one
     Type: String
     Default: 'NONE'
-  DisableOutputParameters:
-    Description: Disallow the use of query parameters to customize the result of callbacks
+  EnableOutputParameters:
+    Description: Allow the use of query parameters to customize the result of callbacks
     Type: String
     AllowedValues:
       - "true"
       - "false"
-    Default: "true"
-  DisablePostActions:
-    Description: Disallow the use of post actions, which pass the callback request body to Step Functions
+    Default: "false"
+  EnablePostActions:
+    Description: Allow the use of post actions, which pass the callback request body to Step Functions
     Type: String
     AllowedValues:
       - "true"
       - "false"
-    Default: "true"
+    Default: "false"
+  VerboseLogging:
+    Description: Log requests and payloads
+    Type: String
+    AllowedValues:
+      - "true"
+      - "false"
+    Default: "false"
 Conditions:
   EncryptionEnabled:
-    Fn::Equals: [ !Ref UseEncryption, "true" ]
+    Fn::Equals: [ !Ref DisableEncryption, "false" ]
   CreateKey:
     Fn::And:
-      - Fn::Equals: [ !Ref UseEncryption, "true" ]
+      - Fn::Equals: [ !Ref DisableEncryption, "false" ]
       - Fn::Equals: [ !Ref EncryptionKeyArn, "NONE" ]
+  OutputParametersDisabled:
+    Fn::Equals: [ !Ref EnableOutputParameters, "false" ]
+  PostActionsDisabled:
+    Fn::Equals: [ !Ref EnablePostActions, "false" ]
+  VerboseLoggingEnabled:
+    Fn::Equals: [ !Ref VerboseLogging, "true" ]
 Outputs:
   Api:
     Value: !Sub "https://${Api}.execute-api.${AWS::Region}.amazonaws.com/${ApiStage}"
@@ -205,9 +218,9 @@ Resources:
       MemorySize: 1024
       Environment:
         Variables:
-          DISABLE_OUTPUT_PARAMETERS: !Ref DisableOutputParameters
-          DISABLE_POST_ACTIONS: !Ref DisablePostActions
-          VERBOSE: "false"
+          DISABLE_OUTPUT_PARAMETERS: {"Fn::If": [OutputParametersDisabled, "true", "false"]}
+          DISABLE_POST_ACTIONS: {"Fn::If": [PostActionsDisabled, "true", "false"]}
+          VERBOSE: {"Fn::If": [VerboseLoggingEnabled, "true", "false"]}
           KEY_ID: 
             "Fn::If":
               - EncryptionEnabled
@@ -227,9 +240,9 @@ Resources:
       MemorySize: 1024
       Environment:
         Variables:
-          DISABLE_OUTPUT_PARAMETERS: !Ref DisableOutputParameters
-          DISABLE_POST_ACTIONS: !Ref DisablePostActions
-          VERBOSE: "false"
+          DISABLE_OUTPUT_PARAMETERS: {"Fn::If": [OutputParametersDisabled, "true", "false"]}
+          DISABLE_POST_ACTIONS: {"Fn::If": [PostActionsDisabled, "true", "false"]}
+          VERBOSE: {"Fn::If": [VerboseLoggingEnabled, "true", "false"]}
           API_ID: !Ref Api
           STAGE: !Ref ApiStage
           KEY_ID: 
@@ -304,9 +317,9 @@ Resources:
       Timeout: 15
       Environment:
         Variables:
-          DISABLE_OUTPUT_PARAMETERS: !Ref DisableOutputParameters
-          DISABLE_POST_ACTIONS: !Ref DisablePostActions
-          VERBOSE: "false"
+          DISABLE_OUTPUT_PARAMETERS: {"Fn::If": [OutputParametersDisabled, "true", "false"]}
+          DISABLE_POST_ACTIONS: {"Fn::If": [PostActionsDisabled, "true", "false"]}
+          VERBOSE: {"Fn::If": [VerboseLoggingEnabled, "true", "false"]}
           KEY_ID:
             "Fn::If":
               - EncryptionEnabled

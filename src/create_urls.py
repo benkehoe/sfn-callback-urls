@@ -69,7 +69,7 @@ def direct_handler(event, context):
 
 def api_handler(event, context):
     """The handler for create URLs calls that come through API Gateway"""
-    if is_verbose:
+    if is_verbose():
         print(f'Request: {event}')
 
     default_api_info = DefaultApiInfo(
@@ -124,7 +124,7 @@ def api_handler(event, context):
     return process_event(event, context, default_api_info, response_formatter)
 
 def process_event(event, context, default_api_info, response_formatter):
-    if is_verbose:
+    if is_verbose():
         print(f'Input: {event}')
         
     try:
@@ -226,7 +226,7 @@ def process_event(event, context, default_api_info, response_formatter):
 
         send_log_event(log_event)
 
-        if is_verbose:
+        if is_verbose():
             print(f'Response: {json.dumps(return_value)}')
 
         return return_value
@@ -243,7 +243,7 @@ def process_event(event, context, default_api_info, response_formatter):
         }
         return_value = response_formatter(400, {}, response)
         send_log_event(log_event)
-        if is_verbose:
+        if is_verbose():
             print(f'Response: {json.dumps(return_value)}')
         return return_value
     except Exception as e:
@@ -260,6 +260,6 @@ def process_event(event, context, default_api_info, response_formatter):
         }
         return_value = response_formatter(500, {}, response)
         send_log_event(log_event)
-        if is_verbose:
+        if is_verbose():
             print(f'Response: {json.dumps(return_value)}')
         return return_value

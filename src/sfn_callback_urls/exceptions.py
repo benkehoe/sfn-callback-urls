@@ -72,6 +72,9 @@ class PostActionsDisabled(RequestError):
 class InvalidPostActionOutcome(RequestError):
     pass
 
+class InvalidJsonPath(RequestError):
+    pass
+
 class InvalidPostActionBody(RequestError):
     pass
 

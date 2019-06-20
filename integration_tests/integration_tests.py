@@ -610,3 +610,31 @@ def test_post_action_fixed_output(state_machine_execution, resources, session, d
     )
 
     assert_dicts_equal(json.loads(test_output.step_functions_response['output']), output)
+
+def test_post_action_output_path(state_machine_execution, resources, session, drain):
+    action_name = uuid.uuid4().hex
+    schema = {
+    }
+    actions = [
+        Actions.post(action_name, [
+            Actions.post.Outcomes.success('good', schema, ('output_path', '$.foo'))
+        ])
+    ]
+
+    post_body = {
+        "foo": {
+            "bar": "baz"
+        }
+    }
+
+    test_output = _run_test(
+        state_machine_execution, resources, session,
+        actions=actions,
+        post_body=post_body
+    )
+
+    expected_output = [
+        {"bar": "baz"}
+    ]
+
+    assert_dicts_equal(json.loads(test_output.step_functions_response['output']), expected_output)
