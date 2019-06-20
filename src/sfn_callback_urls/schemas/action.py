@@ -12,7 +12,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-response_schema = {
+name_pattern = r"^\w+$"
+
+action_response_schema = {
     "type": "object",
     "properties": {
         "json": {
@@ -31,43 +33,166 @@ response_schema = {
     }
 }
 
-schema = {
-    "type": "object",
-    "properties": {
-        "type": {
+def _get_action_schema(
+        type_schema,
+        properties={},
+        required=[],
+        schema={}):
+    ts = {
+        "type": "string"
+    }
+    ts.update(type_schema)
+    props = {
+        "name": {
             "type": "string",
-            "enum": ["success", "failure", "heartbeat"]
+            "pattern": name_pattern
         },
-        "response": response_schema
-    },
-    "required": ["type"],
-    "allOf": [
-        {
-            "if": {
-                "properties": { "type": { "const": "success" } }
+        "type": ts,
+        "response": action_response_schema
+    }
+    props.update(properties)
+    req = ["name", "type"]
+    req.extend(required)
+    s = {
+        "type": "object",
+        "properties": props,
+        "required": req
+    }
+    s.update(schema)
+    return s
+
+def _get_post_outcome_schema(
+        type_schema,
+        properties={},
+        required=[],
+        schema={}):
+    p = {
+        "schema": {
+            "type": "object"
+        }
+    }
+    p.update(properties)
+    req = ["schema"]
+    req.extend(required)
+    return _get_action_schema(
+        type_schema,
+        properties=p,
+        required=req,
+        schema=schema
+    )
+
+post_outcome_success_schema = _get_post_outcome_schema(
+    type_schema={"const": "success"},
+    schema={
+        "oneOf": [
+            {
+                "properties": {
+                    "output_body": {
+                        "const": True,
+                    }
+                },
+                "required": ["output_body"]
             },
-            "then": {
+            {
+                "properties": {
+                    "output_path": {
+                        "type": "string"
+                    }
+                },
+                "required": ["output_path"]
+            },
+            {
                 "properties": {
                     "output": {}
                 },
                 "required": ["output"]
             }
-            
+        ]
+    }
+)
+post_outcome_failure_schema = _get_post_outcome_schema(
+    type_schema={"const": "failure"},
+    properties={
+        "error": {
+            "type": "string"
         },
-        {
-            "if": {
-                "properties": { "type": { "const": "failure" } }
+        "error_path": {
+            "type": "string"
+        },
+        "cause": {
+            "type": "string"
+        },
+        "cause_path": {
+            "type": "string"
+        }
+    },
+    schema={
+        "allOf": [
+            {
+                "not": {
+                    "required": ["error", "error_path"]
+                }
             },
-            "then": {
-                "properties": {
-                    "error": {
-                        "type": "string"
-                    },
-                    "cause": {
-                        "type": "string"
-                    }
+            {
+                "not": {
+                    "required": ["cause", "cause_path"]
                 }
             }
+        ]
+    }
+)
+post_outcome_heartbeat_schema = _get_post_outcome_schema(
+    type_schema={"const": "heartbeat"}
+)
+
+post_outcome_schema = {
+    "oneOf": [
+        post_outcome_success_schema,
+        post_outcome_failure_schema,
+        post_outcome_heartbeat_schema
+    ]
+}
+
+post_action_schema = _get_action_schema(
+    type_schema={"const": "post"},
+    properties={
+        "outcomes": {
+            "type": "array",
+            "items": post_outcome_schema,
+            "minItems": 1
         }
+    }
+)
+
+success_action_schema = _get_action_schema(
+    type_schema={"const": "success"},
+    properties={
+        "output": {}
+    },
+    required=["output"]
+)
+
+failure_action_schema = _get_action_schema(
+    type_schema={"const": "failure"},
+    properties={
+        "error": {
+            "type": "string"
+        },
+        "cause": {
+            "type": "string"
+        }
+    },
+)
+
+heartbeat_action_schema = _get_action_schema(
+    type_schema={"const": "heartbeat"}
+)
+
+action_schema = {
+    "oneOf": [
+        success_action_schema,
+        failure_action_schema,
+        heartbeat_action_schema,
+        post_action_schema
     ]
 }

@@ -28,17 +28,19 @@ import aws_encryption_sdk
 import jsonschema
 
 from sfn_callback_urls.payload import PayloadBuilder, encode_payload
-from sfn_callback_urls.callbacks import get_url
-from sfn_callback_urls.common import send_log_event, get_header, is_verbose
+from sfn_callback_urls.callbacks import get_api_gateway_url, get_url
+from sfn_callback_urls.common import send_log_event, get_header, is_verbose, get_disable_post_actions
+from sfn_callback_urls.post_actions import validate_post_action
 
 from sfn_callback_urls.exceptions import (
     BaseError,
-    MissingApiParametersError,
-    InvalidActionError,
-    InvalidDateError
+    DuplicateActionName,
+    InvalidAction,
+    InvalidDate,
+    PostActionsDisabled
 )
 
-from sfn_callback_urls.schemas.create_urls import schema as CREATE_URL_EVENT_SCHEMA
+from sfn_callback_urls.schemas.create_urls import create_urls_input_schema
 
 # See schemas.create_urls for example event
 
@@ -60,14 +62,14 @@ def direct_handler(event, context):
         stage=os.environ['STAGE']
     )
 
-    def response_formatter(statusCode, response):
-        return response
+    def response_formatter(statusCode, headers, body):
+        return body
     
     return process_event(event, context, default_api_info, response_formatter)
 
 def api_handler(event, context):
     """The handler for create URLs calls that come through API Gateway"""
-    if is_verbose:
+    if is_verbose():
         print(f'Request: {event}')
 
     default_api_info = DefaultApiInfo(
@@ -76,13 +78,15 @@ def api_handler(event, context):
         stage=event['requestContext']['stage']
     )
 
-    def response_formatter(statusCode, response):
+    def response_formatter(statusCode, headers, body):
+        h = {
+            'Content-Type': 'application/json',
+        }
+        h.update(headers)
         return {
             'statusCode': statusCode,
-            'headers': {
-                'Content-Type': 'application/json',
-            },
-            'body': json.dumps(response)
+            'headers': headers,
+            'body': json.dumps(body) if body else ''
         }
 
     # Only allow POST
@@ -120,13 +124,13 @@ def api_handler(event, context):
     return process_event(event, context, default_api_info, response_formatter)
 
 def process_event(event, context, default_api_info, response_formatter):
-    if is_verbose:
+    if is_verbose():
         print(f'Input: {event}')
         
     try:
-        jsonschema.validate(event, CREATE_URL_EVENT_SCHEMA)
+        jsonschema.validate(event, create_urls_input_schema)
     except jsonschema.ValidationError as e:
-        return response_formatter(400,{
+        return response_formatter(400, {}, {
                     'error': 'InvalidJSON',
                     'message': f'{str(e)}',
                 })
@@ -141,27 +145,24 @@ def process_event(event, context, default_api_info, response_formatter):
     }
 
     try:
-        # Allow the user to specify another API Gateway, either for a separate sfn-callback-urls
+        # Allow the user to specify another URL endpoint, either for a separate sfn-callback-urls
         # deployment, for example in a multi-region or multi-account scenario. The user is on
         # their own for getting the same KMS key in both places.
-        if 'api' in event:
-            api_spec = event['api']
-            region = api_spec.get('region', default_api_info.region)
-            api_id = api_spec.get('api_id')
-            stage = api_spec.get('stage')
+        if 'base_url' in event:
+            if isinstance(event['base_url'], str):
+                base_url = event['base_url']
+            else:
+                api_spec = event['base_url']
+                region = api_spec.get('region', default_api_info.region)
+                api_id = api_spec['api_id']
+                stage = api_spec['stage']
 
-            missing = []
-            if not api_id:
-                missing.append('API id')
-            if not stage:
-                missing.append('stage')
-            if missing:
-                message = 'Missing ' + ' and '.join(missing)
-                raise MissingApiParametersError(message)
+                base_url = get_api_gateway_url(api_id, stage, region)
         else:
             region = default_api_info.region
             api_id = default_api_info.api_id
             stage = default_api_info.stage
+            base_url = get_api_gateway_url(api_id, stage, region)
         
         log_event.update({
             'api_id': api_id,
@@ -179,51 +180,53 @@ def process_event(event, context, default_api_info, response_formatter):
             try:
                 expiration = dateutil.parser.parse(event['expiration'])
             except Exception as e:
-                raise InvalidDateError(f'Invalid expiration: {str(e)}')
+                raise InvalidDate(f'Invalid expiration: {str(e)}')
             expiration_delta = (expiration - timestamp).total_seconds()
-            if expiration_delta <= 0:
-                raise InvalidDateError('Expiration is in the past')
             log_event['expiration_delta'] = expiration_delta
+            if expiration_delta <= 0:
+                raise InvalidDate('Expiration is in the past')
             response['expiration'] = expiration.isoformat()
         
         payload_builder = PayloadBuilder(transaction_id, timestamp, event['token'],
-                enable_output_parameters=event.get('enable_output_parameters'),
-                expiration=expiration)
+            enable_output_parameters=event.get('enable_output_parameters'),
+            expiration=expiration,
+            issuer=getattr(context, 'invoked_function_arn', None)
+        )
 
-        actions = {}
-        for action_name, action_data in event['actions'].items():
-            action_type = action_data['type']
-            actions[action_name] = action_type
-            action_payload_data = {}
+        actions_for_log = {}
+        for action in event['actions']:
+            action_name = action['name']
+            action_type = action['type']
+
+            if action_name in actions_for_log:
+                raise DuplicateActionName(f'Action {action_name} provided more than once')
+
+            if action_type == 'post':
+                validate_post_action(action)
+
+            actions_for_log[action_name] = action_type
+
+            action_response = action.get('response', {})
+            if 'redirect' in action_response:
+                log_event['redirect'] = True
+            elif any(v in action_response for v in ['json', 'html', 'text']):
+                log_event['response_override'] = True
             
-            if action_type == 'success':
-                action_payload_data['output'] = action_data['output']
-            elif action_type == 'failure':
-                for key in ['error', 'cause']:
-                    if key in action_data:
-                        action_payload_data[key] = action_data[key]
-            elif action_type != 'heartbeat':
-                raise InvalidActionError(f'Unexpected action type {action_type}')
-
-            action_response_data = action_data.get('response', {})
-
-            payload = payload_builder.build(action_name, action_type, action_payload_data,
-                    response=action_response_data,
+            payload = payload_builder.build(action,
                     log_event=log_event)
 
             encoded_payload = encode_payload(payload, MASTER_KEY_PROVIDER)
 
             response['urls'][action_name] = get_url(
-                    action_name, action_type, encoded_payload,
-                    api_id, stage, region, log_event=log_event)
+                    base_url, action_name, action_type, encoded_payload, log_event=log_event)
 
-        log_event['actions'] = actions
+        log_event['actions'] = actions_for_log
         
-        return_value = response_formatter(200, response)
+        return_value = response_formatter(200, {}, response)
 
         send_log_event(log_event)
 
-        if is_verbose:
+        if is_verbose():
             print(f'Response: {json.dumps(return_value)}')
 
         return return_value
@@ -238,9 +241,9 @@ def process_event(event, context, default_api_info, response_formatter):
             'error': e.code(),
             'message': e.message(),
         }
-        return_value = response_formatter(400, response)
+        return_value = response_formatter(400, {}, response)
         send_log_event(log_event)
-        if is_verbose:
+        if is_verbose():
             print(f'Response: {json.dumps(return_value)}')
         return return_value
     except Exception as e:
@@ -255,8 +258,8 @@ def process_event(event, context, default_api_info, response_formatter):
             'error': error_class_name,
             'message': str(e),
         }
-        return_value = response_formatter(500, response)
+        return_value = response_formatter(500, {}, response)
         send_log_event(log_event)
-        if is_verbose:
+        if is_verbose():
             print(f'Response: {json.dumps(return_value)}')
         return return_value

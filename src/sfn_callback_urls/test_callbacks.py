@@ -18,9 +18,10 @@ from copy import deepcopy
 
 from sfn_callback_urls.callbacks import (
     get_header,
+    get_api_gateway_url,
     get_url,
-    load_from_request, InvalidPayloadError,
-    format_output, OutputFormattingError,
+    load_from_request, InvalidPayload,
+    format_output, OutputFormatting,
     format_response
 )
 
@@ -149,7 +150,7 @@ def test_format_output_simple():
     formatted = format_output(output, {'foo': 'bar'})
     assert formatted == 'bar'
 
-    with pytest.raises(OutputFormattingError):
+    with pytest.raises(OutputFormatting):
         format_output(output, {})
 
     output = {'$foo': '$bar'}
@@ -159,7 +160,7 @@ def test_format_output_simple():
     formatted = format_output(output, {'foo': 'oof', 'bar': 'rab'})
     assert_dicts_equal(formatted, {'oof': 'rab'})
 
-    with pytest.raises(OutputFormattingError):
+    with pytest.raises(OutputFormatting):
         format_output(output, {})
 
 

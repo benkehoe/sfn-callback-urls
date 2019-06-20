@@ -27,14 +27,35 @@ import botocore.exceptions
 import aws_encryption_sdk
 import jsonschema
 
-from sfn_callback_urls.callbacks import load_from_request, format_output, format_response
-from sfn_callback_urls.payload import decode_payload, validate_payload_schema, validate_payload_expiration
-from sfn_callback_urls.common import send_log_event, get_force_disable_parameters, is_verbose
+from sfn_callback_urls.callbacks import (
+    load_from_request,
+    prepare_method_params,
+    format_response
+)
+from sfn_callback_urls.payload import (
+    decode_payload,
+    validate_payload_schema,
+    validate_payload_expiration
+)
+from sfn_callback_urls.post_actions import (
+    load_post_action_body,
+    process_post_action
+)
+from sfn_callback_urls.common import (
+    send_log_event,
+    get_force_disable_parameters,
+    get_disable_post_actions,
+    is_verbose,
+    get_header
+)
 
 from sfn_callback_urls.exceptions import (
+    ReturnHttpResponse,
     BaseError,
-    ActionMismatchedError,
-    ParametersDisabledError,
+    ActionMismatched,
+    ParametersDisabled,
+    PostActionsDisabled,
+    InvalidPostActionBody,
     StepFunctionsError
 )
 
@@ -48,7 +69,7 @@ if 'KEY_ID' in os.environ:
     )
 
 def handler(request, context):
-    if is_verbose:
+    if is_verbose():
         print(f'Request: {json.dumps(request)}')
 
     timestamp = datetime.datetime.now()
@@ -74,7 +95,7 @@ def handler(request, context):
 
         validate_payload_schema(payload)
 
-        if is_verbose:
+        if is_verbose():
             print(f'Payload: {json.dumps(payload)}')
         
         # use the same transaction id given out in the create urls call
@@ -88,14 +109,14 @@ def handler(request, context):
         # versions differ from the payload, something funny is going on and we reject
         # the request. But if they are absent, it's not a problem.
 
-        action_name_in_payload = payload['name']
+        action_name_in_payload = payload['action']['name']
         if action_name_from_url and action_name_from_url != action_name_in_payload:
-            raise ActionMismatchedError(f'The action name says {action_name_from_url} in the url but {action_name_in_payload} in the payload')
+            raise ActionMismatched(f'The action name says {action_name_from_url} in the url but {action_name_in_payload} in the payload')
         action_name = action_name_in_payload
 
-        action_type_in_payload = payload['act']
+        action_type_in_payload = payload['action']['type']
         if action_type_from_url and action_type_from_url != action_type_in_payload:
-            raise ActionMismatchedError(f'The action type says {action_type_in_payload} in the url but {action_type_in_payload} in the payload')
+            raise ActionMismatched(f'The action type says {action_type_in_payload} in the url but {action_type_in_payload} in the payload')
         action_type = action_type_in_payload
 
         log_event['action'] = {
@@ -111,33 +132,43 @@ def handler(request, context):
         # that has parameters enabled, even though it was presumably
         # valid at creation time to have parameters enabled.
         force_disable_parameters = get_force_disable_parameters()
-        use_parameters = payload.get('par', False)
+        use_parameters = payload.get('param', False)
         if use_parameters and force_disable_parameters:
-            raise ParametersDisabledError('Parameters are disabled')
+            raise ParametersDisabled('Parameters are disabled')
         if not use_parameters:
             parameters = None
         
-        action_data = payload.get('data', {})
+        action = payload['action']
 
-        response_spec = payload.get('resp', {})
+        response_spec = action.get('response', {})
 
-        return_value = format_response(200, response, request, response_spec, parameters, log_event)
+        outcome_name = action_name
+        outcome_type = action_type
 
-        method = f'send_task_{action_type}'
-
-        method_params = {
-            'taskToken': payload['token']
-        }
-
-        if action_type == 'success':
-            output = action_data.get('output', {})
-            output = format_output(output, parameters)
-            method_params['output'] = json.dumps(output)
-        elif action_type == 'failure':
-            for key in ['error', 'cause']:
-                if key in action_data:
-                    method_params[key] = action_data[key]
+        if action_type == 'post':
+            (
+                post_outcome_name,
+                post_outcome_type,
+                outcome_response_spec,
+                method_params
+            ) = process_post_action(action, request, parameters, log_event)
+            outcome_name = outcome_name + '.' + post_outcome_name
+            outcome_type = post_outcome_type
+            
+            if outcome_response_spec is not None:
+                response_spec = outcome_response_spec
+        else:
+            method_params = prepare_method_params(action, parameters, log_event=log_event)
         
+        log_event['outcome_name'] = outcome_name
+        log_event['outcome_type'] = outcome_type
+
+        if is_verbose():
+            print(f'Input for {outcome_type}: {json.dumps(method_params)}')
+
+        method = f'send_task_{outcome_type}'
+        method_params['taskToken'] = payload['token']
+
         try:
             sfn_call_start = time.perf_counter()
             sfn_response = getattr(STEP_FUNCTIONS_CLIENT, method)(**method_params)
@@ -160,11 +191,24 @@ def handler(request, context):
                 raise StepFunctionsError(f'{error_code}:{error_msg}')
             raise
 
+        return_value = format_response(200, response, request, response_spec, parameters, log_event)
+
         send_log_event(log_event)
 
-        if is_verbose:
+        if is_verbose():
             print(f'Response: {json.dumps(return_value)}')
 
+        return return_value
+    except ReturnHttpResponse as e:
+        log_event['error'] = {
+            'type': e.TYPE,
+            'error': e.code(),
+            'message': e.message(),
+        }
+        return_value = e.get_response()
+        send_log_event(log_event)
+        if is_verbose():
+            print(f'Response: {json.dumps(return_value)}')
         return return_value
     except BaseError as e:
         response = OrderedDict((
@@ -178,7 +222,7 @@ def handler(request, context):
         }
         return_value = format_response(400, response, request, {}, None, log_event)
         send_log_event(log_event)
-        if is_verbose:
+        if is_verbose():
             print(f'Response: {json.dumps(return_value)}')
         return return_value
     except Exception as e:
@@ -195,6 +239,6 @@ def handler(request, context):
         }
         return_value = format_response(500, response, request, {}, None, log_event)
         send_log_event(log_event)
-        if is_verbose:
+        if is_verbose():
             print(f'Response: {json.dumps(return_value)}')
         return return_value

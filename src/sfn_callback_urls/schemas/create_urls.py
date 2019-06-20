@@ -12,12 +12,13 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from .action import schema as _ACTION_SCHEMA
+from .action import action_schema
 
 skeleton = lambda: {
     "token": "<from Step Functions>",
-    "actions": {
-        "<action name 1>": {
+    "actions": [
+        {
+            "name": "<action name 1>",
             "type": "success",
             "output": {
                 "<user>": "<defined>"
@@ -26,12 +27,14 @@ skeleton = lambda: {
                 "redirect": "https://example.com"
             }
         },
-        "<action name 2>": {
+        {
+            "name": "<action name 2>",
             "type": "failure",
             "error": "MyErrorCode",
             "cause": "User-friendly message",
         },
-        "<action name 3>": {
+        {
+            "name": "<action name 3>",
             "type": "heartbeat",
             "response": {
                 "json": {
@@ -40,24 +43,21 @@ skeleton = lambda: {
                 "html": "<html>thump thump</html>"
             }
         }
-    },
+    ],
     "expiration": "<RFC3339-formatted datetime>",
     "enable_output_parameters": False,
 }
 
-schema = {
+create_urls_input_schema = {
     "type": "object",
     "properties": {
         "token": {
             "type": "string"
         },
         "actions": {
-            "type": "object",
-            "additionalProperties": False,
-            "patternProperties": {
-                "^\\w+$": _ACTION_SCHEMA,
-            },
-            "minProperties": 1,
+            "type": "array",
+            "items": action_schema,
+            "minItems": 1,
         },
         "expiration": {
             "type": "string",
@@ -66,20 +66,28 @@ schema = {
         "enable_output_parameters": {
             "type": "boolean"
         },
-        "api": {
-            "type": "object",
-            "properties": {
-                "api_id": {
-                    "type": "string"
+        "base_url": {
+            "oneOf": [
+                {
+                    "type": "object",
+                    "properties": {
+                        "api_id": {
+                            "type": "string"
+                        },
+                        "stage": {
+                            "type": "string"
+                        },
+                        "region": {
+                            "type": "string",
+                        }
+                    },
+                    "required": ["api_id", "stage"]
                 },
-                "stage": {
-                    "type": "string"
-                },
-                "region": {
+                {
                     "type": "string",
+                    "format": "uri"
                 }
-            },
-            "required": ["api_id", "stage"]
+            ]
         }
     },
     "required": ["token", "actions"],

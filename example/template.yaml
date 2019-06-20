@@ -123,19 +123,21 @@ Resources:
               if event['state'] == 'SendApprovalRequest':
                   input = {
                       "token": event['token'],
-                      "actions": {
-                          "approve": {
+                      "actions": [
+                          {
+                              "name": "approve",
                               "type": "success",
                               "output": {
                                   "name_in_output": event['name_in_input']
                               }
                           },
-                          "reject": {
+                          {
+                              "name": "reject",
                               "type": "failure",
                               "error": "rejected",
                               "cause": event['name_in_input'] + " rejected it"
                           }
-                      }
+                      ]
                   }
                   response = boto3.client('lambda').invoke(
                       FunctionName=os.environ['CREATE_URLS_FUNCTION_NAME'],

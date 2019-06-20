@@ -19,7 +19,8 @@ import json
 import jsonschema
 
 import create_urls
-from sfn_callback_urls.schemas.action import schema as ACTION_SCHEMA
+from sfn_callback_urls.schemas.action import action_schema
+from sfn_callback_urls.schemas.create_urls import create_urls_input_schema
 
 def assert_dicts_equal(a, b):
     assert json.dumps(a, sort_keys=True) == json.dumps(b, sort_keys=True)
@@ -146,13 +147,15 @@ get_request = lambda: {
     "isBase64Encoded": False
 }
 
-get_success = lambda output: {
+get_success = lambda name, output: {
+    'name': name,
     'type': 'success',
     'output': output,
 }
 
-def get_failure(error=None, cause=None):
+def get_failure(name, error=None, cause=None):
     action = {
+        'name': name,
         'type': 'failure'
     }
     if error:
@@ -161,12 +164,15 @@ def get_failure(error=None, cause=None):
         action['cause'] = cause
     return action
 
-get_heartbeat = lambda: { 'type': 'heartbeat' }
+get_heartbeat = lambda name: {
+    'name': name,
+    'type': 'heartbeat'
+}
 
 def get_event(actions,
         expiration=None,
         enable_output_parameters=None,
-        api=None):
+        base_url=None):
     event = {
         'token': 'asdf',
         'actions': actions,
@@ -178,18 +184,18 @@ def get_event(actions,
     if enable_output_parameters is not None:
         event['enable_output_parameters'] = enable_output_parameters
     
-    if api is not None:
-        event['api'] = api
+    if base_url is not None:
+        event['base_url'] = base_url
     
     return event
 
 def test_action_schema():
     def assert_good(obj):
-        jsonschema.validate(obj, ACTION_SCHEMA)
+        jsonschema.validate(obj, action_schema)
     
     def assert_bad(obj):
         with pytest.raises(jsonschema.ValidationError):
-            jsonschema.validate(obj, ACTION_SCHEMA)
+            jsonschema.validate(obj, action_schema)
 
     assert_bad({})
 
@@ -201,51 +207,72 @@ def test_action_schema():
         'type': 'success'
     })
 
-    assert_good({
+    assert_bad({
         'type': 'success',
         'output': 'foo'
     })
 
     assert_good({
+        'name': 'foo_1',
+        'type': 'success',
+        'output': 'foo'
+    })
+
+    assert_good({
+        'name': 'foo_1',
         'type': 'success',
         'output': {}
     })
     
+    assert_bad({
+        'type': 'failure'
+    })
+
     assert_good({
+        'name': '1_bar',
         'type': 'failure'
     })
 
     assert_bad({
+        'name': '1_bar',
         'type': 'failure',
         'error': {}
     })
     
     assert_good({
+        'name': '1_bar',
         'type': 'failure',
         'error': 'foo'
     })
 
     assert_bad({
+        'name': '1_bar',
         'type': 'failure',
         'cause': {}
     })
     
     assert_good({
+        'name': '1_bar',
         'type': 'failure',
         'cause': 'foo'
     })
 
+    assert_bad({
+        'type': 'heartbeat'
+    })
+
     assert_good({
+        'name': 'ekg',
         'type': 'heartbeat'
     })
 
 def test_event_schema():
     def assert_good(obj):
-        jsonschema.validate(obj, create_urls.CREATE_URL_EVENT_SCHEMA)
+        jsonschema.validate(obj, create_urls_input_schema)
     
     def assert_bad(obj):
         with pytest.raises(jsonschema.ValidationError):
-            jsonschema.validate(obj, create_urls.CREATE_URL_EVENT_SCHEMA)
+            jsonschema.validate(obj, create_urls_input_schema)
     
     assert_bad({})
 
@@ -258,44 +285,54 @@ def test_event_schema():
         'actions': {},
     })
 
+    assert_bad({
+        'token': 'foo',
+        'actions': [],
+    })
+
     assert_good({
         'token': 'foo',
-        'actions': {
-            'foo': {
+        'actions': [
+            {
+                'name': 'foo',
                 'type': 'heartbeat'
             },
-            'f': {
+            {
+                'name': 'f',
                 'type': 'success',
                 'output': {}
             }
-        }
+        ]
     })
 
     assert_bad({
         'token': 1,
-        'actions': {
-            'foo': {
+        'actions': [
+            {
+                'name': 'foo',
                 'type': 'heartbeat'
             }
-        }
+        ]
     })
 
     assert_bad({
         'token': 'foo',
-        'actions': {
-            '': {
+        'actions': [
+            {
+                'name': '',
                 'type': 'heartbeat'
             }
-        }
+        ]
     })
 
     assert_bad({
         'token': 'foo',
-        'actions': {
-            '$foo': {
+        'actions': [
+            {
+                'name': '$foo',
                 'type': 'heartbeat'
             }
-        }
+        ]
     })
 
 def test_wrong_method():
@@ -351,29 +388,30 @@ def test_basic_request():
     req = get_request()
 
     req['body'] = json.dumps(
-        get_event(actions={
-            'foo': get_success({'spam': 'eggs'}),
-            'bar': get_failure(),
-            'baz': get_heartbeat()
-        })
+        get_event(actions=[
+            get_success('foo', {'spam': 'eggs'}),
+            get_failure('bar'),
+            get_heartbeat('baz')
+        ])
     )
 
     resp = create_urls.api_handler(req, None)
     assert resp['statusCode'] == 200
 
     body = json.loads(resp['body'])
-
+    assert 'urls' in body
     assert len(body['urls']) == 3
 
 def test_basic_event(monkeypatch):
     monkeypatch.setenv('API_ID', 'gy415nuibc')
     monkeypatch.setenv('STAGE', 'testStage')
     
-    event = get_event(actions={
-        'foo': get_success({'spam': 'eggs'}),
-        'bar': get_failure(),
-        'baz': get_heartbeat()
-    })
+    event = get_event(actions=[
+        get_success('foo', {'spam': 'eggs'}),
+        get_failure('bar'),
+        get_heartbeat('baz')
+    ])
 
     resp = create_urls.direct_handler(event, None)
+    assert 'urls' in resp
     assert len(resp['urls']) == 3

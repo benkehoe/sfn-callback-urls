@@ -23,13 +23,13 @@ import aws_encryption_sdk
 
 from sfn_callback_urls.payload import (
     PayloadBuilder,
-    validate_payload_schema, InvalidPayloadError,
-    validate_payload_expiration, ExpiredPayloadError,
+    validate_payload_schema, InvalidPayload,
+    validate_payload_expiration, ExpiredPayload,
     encode_payload,
-    decode_payload, DecryptionUnsupportedError, EncryptionRequiredError
+    decode_payload, DecryptionUnsupported, EncryptionRequired
 )
 from sfn_callback_urls.common import DISABLE_PARAMETERS_ENV_VAR_NAME
-from sfn_callback_urls.exceptions import ParametersDisabledError
+from sfn_callback_urls.exceptions import ParametersDisabled
 
 PAYLOAD_SKELETON = {
     'iss': 'function name',
@@ -51,20 +51,20 @@ def test_build_basic():
     ts = datetime.datetime.now()
     token = uuid.uuid4().hex
     
-    an = 'foo'
-    at = 'success'
-    ad = {'output': {'bar': 'baz'}}
+    action = {
+        "name": "foo",
+        "type": "success",
+        "output": {"bar": "baz"}
+    }
 
     pb = PayloadBuilder(tid, ts, token)
-    payload = pb.build(an, at, ad)
+    payload = pb.build(action)
 
     assert payload['tid'] == tid
     assert payload['iat'] == int(ts.timestamp())
     assert payload['token'] == token
 
-    assert payload['name'] == an
-    assert payload['act'] == at
-    assert_dicts_equal(payload['data'], ad)
+    assert_dicts_equal(payload['action'], action)
 
     validate_payload_schema(payload)
 
@@ -76,25 +76,25 @@ def test_build_exp():
     exp = now - datetime.timedelta(seconds=2)
     token = uuid.uuid4().hex
     
-    an = 'foo'
-    at = 'success'
-    ad = {'output': {'bar': 'baz'}}
+    action = {
+        "name": "foo",
+        "type": "success",
+        "output": {"bar": "baz"}
+    }
 
     pb = PayloadBuilder(tid, ts, token, expiration=exp)
-    payload = pb.build(an, at, ad)
+    payload = pb.build(action)
 
     assert payload['tid'] == tid
     assert payload['iat'] == int(ts.timestamp())
     assert payload['exp'] == int(exp.timestamp())
     assert payload['token'] == token
 
-    assert payload['name'] == an
-    assert payload['act'] == at
-    assert_dicts_equal(payload['data'], ad)
+    assert_dicts_equal(payload['action'], action)
 
     validate_payload_schema(payload)
 
-    with pytest.raises(ExpiredPayloadError):
+    with pytest.raises(ExpiredPayload):
         validate_payload_expiration(payload, now)
 
 def test_build_parameters(monkeypatch):
@@ -102,22 +102,24 @@ def test_build_parameters(monkeypatch):
     ts = datetime.datetime.now()
     token = uuid.uuid4().hex
     
-    an = 'foo'
-    at = 'success'
-    ad = {'output': {'bar': 'baz'}}
+    action = {
+        "name": "foo",
+        "type": "success",
+        "output": {"bar": "baz"}
+    }
 
     pb = PayloadBuilder(tid, ts, token, enable_output_parameters=True)
 
     with monkeypatch.context() as mp:
         mp.delenv(DISABLE_PARAMETERS_ENV_VAR_NAME, raising=False)
 
-        payload = pb.build(an, at, ad)
+        payload = pb.build(action)
     
     with monkeypatch.context() as mp:
         mp.setenv(DISABLE_PARAMETERS_ENV_VAR_NAME, 'true')
 
-        with pytest.raises(ParametersDisabledError):
-            payload = pb.build(an, at, ad)
+        with pytest.raises(ParametersDisabled):
+            payload = pb.build(action)
 
 def test_validate_payload_basic():
     payload_skeleton = {
@@ -126,48 +128,43 @@ def test_validate_payload_basic():
         'tid': 'asdf',
         'exp': 0,
         'token': 'jkljkl',
-        'name': 'foo',
-        'par': False,
+        'action': {
+            'name': 'foo',
+        },
+        'param': False,
     }
 
-    # missing actions
-    with pytest.raises(InvalidPayloadError):
-        validate_payload_schema(payload_skeleton)
+    payload = payload_skeleton.copy()
+    del payload['action']
+    with pytest.raises(InvalidPayload):
+        validate_payload_schema(payload_skeleton) # missing action
+    
+    payload = payload_skeleton.copy()
+    with pytest.raises(InvalidPayload):
+        validate_payload_schema(payload_skeleton) # missing action type
 
     payload = payload_skeleton.copy()
-    payload['act'] = 'success'
-    with pytest.raises(InvalidPayloadError): # missing data
+    payload['action']['type'] = 'success'
+    with pytest.raises(InvalidPayload): # missing output
         validate_payload_schema(payload)
-    payload['data'] = {}
-    with pytest.raises(InvalidPayloadError): # missing output
-        validate_payload_schema(payload)
-    payload['data']['output'] = 'foo'
-    with pytest.raises(InvalidPayloadError): # output isn't object
-        validate_payload_schema(payload)
-    payload['data']['output'] = {}
+    payload['action']['output'] = 'foo'
+    validate_payload_schema(payload)
+    payload['action']['output'] = {}
     validate_payload_schema(payload)
 
     payload = payload_skeleton.copy()
-    payload['act'] = 'failure'
-    with pytest.raises(InvalidPayloadError): # missing data
-        validate_payload_schema(payload)
-    payload['data'] = {}
+    payload['action']['type'] = 'failure'
+    validate_payload_schema(payload)
+    payload['action']['error'] = 'SomeError'
     validate_payload_schema(payload)
 
     payload = payload_skeleton.copy()
-    payload['act'] = 'heartbeat'
-    with pytest.raises(InvalidPayloadError): # missing data
-        validate_payload_schema(payload)
-    payload['data'] = {}
+    payload['action']['type'] = 'heartbeat'
     validate_payload_schema(payload)
-
-    payload_skeleton['act'] = 'heartbeat'
 
     payload = payload_skeleton.copy()
     payload['foo'] = 'bar'
-
-    with pytest.raises(InvalidPayloadError):
-        validate_payload_schema(payload)
+    validate_payload_schema(payload) # additional properties are ok
 
 """
 encode decode
@@ -184,12 +181,12 @@ def test_basic_payload_coding():
         'tid': 'asdf',
         'exp': 0,
         'token': 'jkljkl',
-        'name': 'foo',
-        'act': 'success',
-        'data': {
+        'action': {
+            'name': 'foo',
+            'type': 'success',
             'output': {}
         },
-        'par': False,
+        'param': False,
         'url': 'https://example.com',
     }
 
@@ -219,12 +216,12 @@ def test_encrypted_payload_coding():
         'tid': 'asdf',
         'exp': 0,
         'token': 'jkljkl',
-        'name': 'foo',
-        'act': 'success',
-        'data': {
+        'action': {
+            'name': 'foo',
+            'type': 'success',
             'output': {}
         },
-        'par': False,
+        'param': False,
     }
 
     validate_payload_schema(payload)
@@ -237,10 +234,10 @@ def test_encrypted_payload_coding():
 
     encoded_payload = encode_payload(payload, None)
     assert encoded_payload.startswith('1-')
-    with pytest.raises(EncryptionRequiredError):
+    with pytest.raises(EncryptionRequired):
         decoded_payload = decode_payload(encoded_payload, mkp)
 
     encoded_payload = encode_payload(payload, mkp)
     assert encoded_payload.startswith('2-')
-    with pytest.raises(DecryptionUnsupportedError):
+    with pytest.raises(DecryptionUnsupported):
         decoded_payload = decode_payload(encoded_payload, None)

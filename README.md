@@ -32,9 +32,7 @@ CODE_BUCKET=TODO_YOUR_S3_BUCKET
 
 STACK_NAME=SfnCallbackUrls
 
-sam build
-sam package --output-template-file packaged-template.yaml --s3-bucket $CODE_BUCKET
-sam deploy --template-file packaged-template.yaml --capabilities CAPABILITY_IAM --stack-name $STACK_NAME
+sam build && sam package --output-template-file packaged-template.yaml --s3-bucket $CODE_BUCKET && sam deploy --template-file packaged-template.yaml --capabilities CAPABILITY_IAM --stack-name $STACK_NAME
 
 # *** Now, let's get to it ***
 
@@ -72,7 +70,7 @@ allows you to inspect the payload nor modify it before using it.
 KMS key, you can put the key ARN in the `EncryptionKeyArn` stack parameter, and it will use that instead of 
 creating one.
 
-If you want to disable encryption entirely, you can set the `EnableEncryption` stack parameter to `false`.
+If you want to disable encryption entirely, you can set the `DisableEncryption` stack parameter to `true`.
 The consequence of disabling encryption is that the contents of a callback URL, including the token and the output you
 want to send to the state machine, are inspectable. Additionally, somebody who has gotten a token they should not have
 could construct a callback URL use it, and since the callback are unauthenticated this would constitute a privilege
@@ -103,27 +101,31 @@ managed policy found as the `Policy` output of the CloudFormation stack.
 ```json5
 {
     "token": "<the token from Step Functions>", // required
-    "actions": { // you must provide at least one action
-        "<a name for this action>": {
+    "actions": [ // you must provide at least one action
+        {
+            "name": "<a name for this action>",
             "type": "success", // this action will cause SendTaskSuccess
             "output": { // required, can be any JSON type
                 "<your>": "<content>"
             },
             "response": {} // optional, see below
         },
-        "<name2>": { // can have as many actions of the same type as you want
+        { // can have as many actions of the same type as you want
+            "name": "<name2>",
             "type": "success",
             "output": "<a different output>"
         },
-        "<name3>": {
+        {
+            "name": "<name3>",
             "type": "failure",  // this action will cause SendTaskFailure
             "error": "<your error code>", // optional
             "cause": "<your error cause>" // optional
         },
-        "<name4>": {
+        {
+            "name": "<name4>",
             "type": "heartbeat" // this action will cause SendTaskHeartbeat (can invoke this type of callback more than once)
         }
-    },
+    ],
     "expiration": "<ISO8601-formatted expiration>", // optional
     "enable_output_parameters": true // optional, and must be enabled on the stack, see below
 }
@@ -148,13 +150,18 @@ In every action, you can provide a response specification in the `response` fiel
 ```json5
 {
     "redirect": "https://example.com", // if the callback is successful, redirect the user to the given URL
+}
+```
+or this:
+```json5
+{
     "json": {"hello": "world"}, // choose the JSON object returned by the callback for the application/json content-type
     "html": "<html>hello, world</html>", // choose the body returned by the callback for the text/html content-type
     "text": "hello, world" // choose the body returned by the callback for the text/plain content-type
 }
 ```
 
-All fields are optional, and are only used when the callback is successful; all errors return fixed content.
+All fields are optional, and are only used when the callback is successfully processed; all errors return fixed content.
 `redirect` takes precedence over the other fields.
 
 ### Expiration
@@ -167,10 +174,10 @@ if a callback is made after then, it will be rejected.
 
 If you've got a lot of different potential successful outputs, you may find it easier to parameterize your callbacks.
 This feature is disabled by default due to the security considerations described below; you have to set
-the `DisableOutputParameters` stack parameter to `false`. Then, you must also opt-in when creating URLs by setting 
+the `EnableOutputParameters` stack parameter to `true`. Then, you must also opt-in when creating URLs by setting 
 the `enable_output_parameters` field to `true` in your request. Any URLs created without `enable_output_parameters`
-set to `true` will not use parameterized output when the callbacks are processed. If `DisableOutputParameters` is
-changed back to `true`, any previously-created callbacks with parameters enabled will be now rejected.
+set to `true` will not use parameterized output when the callbacks are processed. If `EnableOutputParameters` is
+changed back to `false`, any previously-created callbacks with parameters enabled will be now rejected.
 
 Once set, any strings in the `output` field for a `success` action, the `error` and `cause` fields for a
 `failure` action, and all the strings in the `response` object are passed through the Python 
@@ -230,3 +237,89 @@ The JSON response on error:
     "message": "<error description>"
 }
 ```
+
+## POST actions
+
+If you'd like to use the body of a POST callback to send output for your task, for example with a webhook,
+you can do this with `post` actions. A post action has a non-empty list of *outcomes*, which use the same form as
+actions with a few extra fields. Each outcome has a *name* and a *type*, where the type is one of
+`success`, `failure`, or `heartbeat`.
+
+Each outcome has a *schema*, which must be a [JSON Schema](https://json-schema.org/) that will be evaluated 
+against the POST body. The first outcome whose schema validates against the body will used. If no schema
+matches the POST body, the callback results in an error.
+
+Like in an action, a `success` outcome can include an `output` field, and a `failure` outcome can have
+`error` and `cause`; these are fixed values. To use the entire body of the request as the output for 
+a `success` outcome, use `"output_body": true` in your outcome.
+To select information from the request body, you can use `output_path` to specify a
+[JSONPath](https://github.com/kennknowles/python-jsonpath-rw#jsonpath-syntax). Because JSONPath expressions
+can return multiple values, the output will *always* be an array; if you expect your expression to return a
+single object, you must select it from the array in your state machine. Similarly, you can use `error_path`
+and `cause_path`; if these return paths return a single string, it will be used, otherwise the resulting
+JSON array of matches will be stringified.
+
+Outcomes can contain responses. POST actions disable output parameters, even if the create URLs call
+requests that they are enabled (other actions in such a call will have them enabled).
+
+A sample request to create a POST action URL looks the following:
+
+```json5
+{
+    "token": "<the token from Step Functions>", // required
+    "actions": [ // you must provide at least one action
+        {
+            "name": "<a name for this action>",
+            "type": "post",
+            "outcomes": [
+                {
+                    "name": "<a name for this happy outcome>",
+                    "type": "success",
+                    "schema": { // require an object that looks like {"result": "good"}
+                        "type": "object",
+                        "properties": {
+                            "result": {
+                                "const": "good"
+                            }
+                        },
+                        "required": [ "result" ]
+                    },
+                    "output_body": true
+                },
+                {
+                    "name": "<a name for this sad outcome",
+                    "type": "failure",
+                    "schema": { // require an object that looks like {"result": "bad", "reason": "..."}
+                        "type": "object",
+                        "properties": {
+                            "result": {
+                                "const": "bad"
+                            },
+                            "reason": {
+                                "type": "string"
+                            }
+                        },
+                        "required": [ "result", "reason" ]
+                    },
+                    "error_path": "$.reason"
+                }
+            ]
+        },
+        { // can have other actions in addition to POST actions
+            "name": "<name2>",
+            "type": "success",
+            "output": "<a different output>"
+        }
+    ]
+}
+```
+
+This feature is disabled by default due to the security considerations described below; you have to set
+the `EnablePostActions` stack parameter to `true`. If `EnablePostActions` is changed back to `false`,
+any previously-created POST action callbacks will be now rejected.
+
+### POST action security
+
+POST actions allow arbitrary output to be passed into an unauthenticated endpoint, and are therefore
+disabled by default. Users are required to provide a JSON schema to validate the body, but this can be
+the empty schema.

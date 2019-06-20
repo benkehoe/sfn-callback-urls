@@ -12,6 +12,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import json
+
 class BaseError(Exception):
     TYPE = 'GenericError'
     
@@ -31,39 +33,78 @@ class RequestError(BaseError):
     """Base class for general client-caused 400 errors"""
     TYPE = 'RequestError'
 
-class ParametersDisabledError(RequestError):
+class DuplicateActionName(RequestError):
     pass
 
-class OutputFormattingError(RequestError):
+class ParametersDisabled(RequestError):
     pass
 
-class InvalidPayloadError(RequestError):
+class OutputFormatting(RequestError):
     pass
 
-class ExpiredPayloadError(RequestError):
+class InvalidPayload(RequestError):
     pass
 
-class EncryptionError(RequestError):
+class ExpiredPayload(RequestError):
     pass
 
-class DecryptionUnsupportedError(RequestError):
+class EncryptionFailed(RequestError):
     pass
 
-class EncryptionRequiredError(RequestError):
+class DecryptionUnsupported(RequestError):
     pass
 
-class MissingApiParametersError(RequestError):
+class EncryptionRequired(RequestError):
     pass
 
-class InvalidActionError(RequestError):
+class InvalidAction(RequestError):
     pass
 
-class InvalidDateError(RequestError):
+class InvalidDate(RequestError):
     pass
 
-class ActionMismatchedError(RequestError):
+class ActionMismatched(RequestError):
+    pass
+
+class PostActionsDisabled(RequestError):
+    pass
+
+class InvalidPostActionOutcome(RequestError):
+    pass
+
+class InvalidJsonPath(RequestError):
+    pass
+
+class InvalidPostActionBody(RequestError):
     pass
 
 class StepFunctionsError(BaseError):
     """Still a 400 error, but resulting from the call to Step Functions"""
     TYPE = 'StepFunctionsError'
+
+class ReturnHttpResponse(Exception):
+    """When processing callbacks, sometimes a direct HTTP response is warranted"""
+    TYPE = RequestError.TYPE
+
+    def __init__(self, code, message, status_code, headers={}, body=None):
+        self._code = code
+        self._message = message
+        self.status_code = status_code
+        self.headers = headers
+        self.body = body
+    
+    def get_response(self):
+        body = ''
+        if body is not None:
+            body = body if isinstance(body, str) else json.dumps(body)
+        return {
+            'statusCode': self.status_code,
+            'headers': self.headers,
+            'body': body
+        }
+
+    def code(self):
+        return self._code
+    
+    def message(self):
+        return self._message
