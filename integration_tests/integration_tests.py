@@ -150,7 +150,7 @@ def state_machine_execution(resources, session):
     print('Deleting queue message')
     message.delete()
 
-def create_urls_with_api(create_urls_input, resources, session):
+def create_urls_with_api(create_urls_input, resources, session, return_raw_response=False):
     for output in resources.app_stack.outputs:
         if output['OutputKey'] == 'Api':
             api_url = output['OutputValue']
@@ -168,9 +168,13 @@ def create_urls_with_api(create_urls_input, resources, session):
         json=create_urls_input
     )
 
+    if return_raw_response:
+        return response
+
     print(f'Response status: {response.status_code}')
     if response.status_code != 200:
         print(f'Response headers: {response.headers}')
+        print(f'Response body: {response.text}')
         raise Exception('API call failed')
     print(f'Response body: {json.dumps(response.json(), indent=2)}')
 
@@ -178,7 +182,7 @@ def create_urls_with_api(create_urls_input, resources, session):
 
     return response
 
-def create_urls_with_lambda(create_urls_input, resources, session):
+def create_urls_with_lambda(create_urls_input, resources, session, return_raw_response=False):
     for output in resources.app_stack.outputs:
         if output['OutputKey'] == 'Function':
             function_name = output['OutputValue']
@@ -188,18 +192,24 @@ def create_urls_with_lambda(create_urls_input, resources, session):
         FunctionName=function_name,
         Payload=json.dumps(create_urls_input)
     )
+    if return_raw_response:
+        return response
     return json.loads(response['Payload'].read())
+
+_TestRunOutput = namedtuple('_TestRunOutput', ['create_urls_response', 'callback_response', 'step_functions_response'])
 
 def _run_test(
         state_machine_execution, resources, session,
         actions,
         action_index=0,
-        validate_execution=True,
+        validate_execution=None,
         expiration=None,
         enable_output_parameters=None,
         create_with='api',
         callback_method='get',
-        post_body=None
+        post_body=None,
+        return_raw_create_urls_response=False,
+        end_after=None,
         ):
     create_urls_input = {
         'token': state_machine_execution.token,
@@ -215,51 +225,66 @@ def _run_test(
     action_type = action['type']
 
     if create_with == 'api':
-        response = create_urls_with_api(create_urls_input, resources, session)
+        create_urls_response = create_urls_with_api(create_urls_input, resources, session,
+                return_raw_response=return_raw_create_urls_response)
     elif create_with == 'function':
-        response = create_urls_with_lambda(create_urls_input, resources, session)
+        create_urls_response = create_urls_with_lambda(create_urls_input, resources, session,
+                return_raw_response=return_raw_create_urls_response)
     else:
         raise ValueError(f'bad create_with {create_with}')
+    
+    if end_after == 'create_urls':
+        return _TestRunOutput(create_urls_response, None, None)
 
-    assert 'urls' in response
-    assert action_name in response['urls']
+    assert 'urls' in create_urls_response
+    assert action_name in create_urls_response['urls']
 
-    url = response['urls'][action_name]
+    url = create_urls_response['urls'][action_name]
 
     print(f'Calling URL {url}')
-    response = requests.get(url)
+    if post_body or callback_method == 'post':
+        kwargs = {}
+        if post_body:
+            kwargs['json'] = post_body
+        callback_response = requests.post(url, **kwargs)
+    elif callback_method == 'get':
+        callback_response = requests.get(url)
+    else:
+        raise ValueError(f'bad response_method {callback_method}')
 
-    print(f'Response status: {response.status_code}')
-    if response.status_code != 200:
-        print(f'Response headers: {response.headers}')
-    print(f'Response body: {json.dumps(response.json(), indent=2)}')
+    print(f'Response status: {callback_response.status_code}')
+    if callback_response.status_code != 200:
+        print(f'Response headers: {callback_response.headers}')
+    print(f'Response body: {json.dumps(callback_response.json(), indent=2)}')
 
-    if validate_execution is False:
-        return response
+    if end_after == 'callback':
+        return _TestRunOutput(create_urls_response, callback_response, None)
 
     client = session.client('stepfunctions')
 
     print(f'Checking state machine execution')
     start = time.time()
     while time.time() - start < 2:
-        response = client.describe_execution(
+        step_functions_response = client.describe_execution(
             executionArn=state_machine_execution.execution_arn
         )
-        if action_type == 'heartbeat' or response["status"] != 'RUNNING':
+        if action_type == 'heartbeat' or step_functions_response["status"] != 'RUNNING':
             break
     else:
         assert False, "Timed out waiting for state machine to finish"
 
 
-    print(f'Status: {response["status"]}')
-    print(f'Response: {response}')
+    print(f'Status: {step_functions_response["status"]}')
+    print(f'Response: {step_functions_response}')
 
     if callable(validate_execution):
-        validate_execution(response)
-    else:
-        action.validate(response)
+        validate_execution(step_functions_response)
+    elif hasattr(action, 'validate'):
+        action.validate(step_functions_response)
 
     print('Complete!')
+
+    return _TestRunOutput(create_urls_response, callback_response, step_functions_response)
 
 class Actions:
     class success(dict):
@@ -308,6 +333,48 @@ class Actions:
         def validate(self, response):
             assert response["status"] == 'RUNNING'
     
+    class post(dict):
+        def __init__(self, name, outcomes, response=None):
+            action = {
+                "name": name,
+                "type": "post",
+                "outcomes": outcomes
+            }
+            if response is not None:
+                action['response'] = response
+            super().__init__(action.items())
+        
+        class Outcomes:
+            class success(dict):
+                def __init__(self, name, schema, output, response=None):
+                    output_key, output_value = output
+                    action = {
+                        'name': name,
+                        'type': 'success',
+                        "schema": schema,
+                        output_key: output_value
+                    }
+                    if response is not None:
+                        action['response'] = response
+                    super().__init__(action.items())
+            
+            class failure(dict):
+                def __init__(self, name, schema, error=None, cause=None, response=None):
+                    action = {
+                        'name': name,
+                        'type': 'failure',
+                        "schema": schema
+                    }
+                    if error is not None:
+                        error_key, error_value = error
+                        action[error_key] = error_value
+                    if cause is not None:
+                        cause_key, cause_value = cause
+                        action[cause_key] = cause_value
+                    if response is not None:
+                        action['response'] = response
+                    super().__init__(action.items())
+            
 def test_basic_success(state_machine_execution, resources, session, drain):
     action_name = uuid.uuid4().hex
     task_output = {"cid_out": state_machine_execution.correlation_id}
@@ -331,3 +398,215 @@ def test_basic_failure(state_machine_execution, resources, session, drain):
         actions=actions,
     )
 
+def test_call_twice(state_machine_execution, resources, session, drain):
+    action_name = uuid.uuid4().hex
+    task_output = {"cid_out": state_machine_execution.correlation_id}
+    actions = [
+        Actions.success(action_name, task_output)
+    ]
+    
+    output = _run_test(
+        state_machine_execution, resources, session,
+        actions=actions,
+        end_after='create_urls'
+    )
+    response = output.create_urls_response
+
+    url = response['urls'][action_name]
+
+    print(f'Calling URL {url}')
+    response = requests.get(url)
+
+    assert response.status_code == 200
+
+    print(f'Calling URL again')
+    response = requests.get(url)
+    assert response.status_code == 400
+
+def test_post_action(state_machine_execution, resources, session, drain):
+    action_name = uuid.uuid4().hex
+    schema = {
+        
+    }
+    actions = [
+        Actions.post(action_name, [
+            Actions.post.Outcomes.success('good', schema, ('output_body', True))
+        ])
+    ]
+
+    post_body = {
+        "foo": "bar"
+    }
+
+    output = _run_test(
+        state_machine_execution, resources, session,
+        actions=actions,
+        post_body=post_body
+    )
+
+    assert_dicts_equal(json.loads(output.step_functions_response['output']), post_body)
+
+def test_post_action_schema_simple(state_machine_execution, resources, session, drain):
+    action_name = uuid.uuid4().hex
+    schema = {
+        "type": "object",
+        "properties": {
+            "foo": {
+                "type": "string"
+            }
+        },
+        "required": [ "foo" ]
+    }
+    actions = [
+        Actions.post(action_name, [
+            Actions.post.Outcomes.success('good', schema, ('output_body', True))
+        ])
+    ]
+
+    post_body = {
+        "foo": "bar"
+    }
+
+    output = _run_test(
+        state_machine_execution, resources, session,
+        actions=actions,
+        post_body=post_body,
+    )
+
+    assert_dicts_equal(json.loads(output.step_functions_response['output']), post_body)
+
+def test_post_action_schema_invalid_body(state_machine_execution, resources, session, drain):
+    action_name = uuid.uuid4().hex
+    schema = {
+        "type": "object",
+        "properties": {
+            "foo": {
+                "type": "string"
+            }
+        },
+        "required": [ "foo" ]
+    }
+    actions = [
+        Actions.post(action_name, [
+            Actions.post.Outcomes.success('good', schema, ('output_body', True))
+        ])
+    ]
+
+    post_body = {
+        "not_foo": "bar"
+    }
+
+    output = _run_test(
+        state_machine_execution, resources, session,
+        actions=actions,
+        post_body=post_body,
+        end_after='callback'
+    )
+
+    assert output.callback_response.status_code == 400
+    assert output.callback_response.json()['error'] == 'InvalidPostActionBody'
+
+def test_post_action_schema_select_1(state_machine_execution, resources, session, drain):
+    action_name = uuid.uuid4().hex
+    success_schema = {
+        "type": "object",
+        "properties": {
+            "foo": {
+                "type": "string"
+            }
+        },
+        "required": [ "foo" ]
+    }
+    failure_schema = {
+        "type": "object",
+        "properties": {
+            "not_foo": {
+                "type": "string"
+            }
+        },
+        "required": [ "not_foo" ]
+    }
+    actions = [
+        Actions.post(action_name, [
+            Actions.post.Outcomes.success('good', success_schema, ('output_body', True)),
+            Actions.post.Outcomes.failure('bad', failure_schema)
+        ])
+    ]
+
+    post_body = {
+        "foo": "bar"
+    }
+
+    output = _run_test(
+        state_machine_execution, resources, session,
+        actions=actions,
+        post_body=post_body,
+    )
+
+    assert_dicts_equal(json.loads(output.step_functions_response['output']), post_body)
+
+def test_post_action_schema_select_2(state_machine_execution, resources, session, drain):
+    action_name = uuid.uuid4().hex
+    success_schema = {
+        "type": "object",
+        "properties": {
+            "foo": {
+                "type": "string"
+            }
+        },
+        "required": [ "foo" ]
+    }
+    failure_schema = {
+        "type": "object",
+        "properties": {
+            "not_foo": {
+                "type": "string"
+            }
+        },
+        "required": [ "not_foo" ]
+    }
+    actions = [
+        Actions.post(action_name, [
+            Actions.post.Outcomes.success('good', success_schema, ('output_body', True)),
+            Actions.post.Outcomes.failure('bad', failure_schema)
+        ])
+    ]
+
+    post_body = {
+        "not_foo": "bar"
+    }
+
+    output = _run_test(
+        state_machine_execution, resources, session,
+        actions=actions,
+        post_body=post_body,
+    )
+
+    assert output.callback_response.status_code == 200
+    assert output.step_functions_response['status'] == 'FAILED'
+
+def test_post_action_fixed_output(state_machine_execution, resources, session, drain):
+    action_name = uuid.uuid4().hex
+    schema = {
+        
+    }
+    output = {
+        "bar": "foo"
+    }
+    actions = [
+        Actions.post(action_name, [
+            Actions.post.Outcomes.success('good', schema, ('output', output))
+        ])
+    ]
+
+    post_body = {
+        "foo": "bar"
+    }
+
+    test_output = _run_test(
+        state_machine_execution, resources, session,
+        actions=actions,
+        post_body=post_body
+    )
+
+    assert_dicts_equal(json.loads(test_output.step_functions_response['output']), output)

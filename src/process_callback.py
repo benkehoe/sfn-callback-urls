@@ -147,11 +147,14 @@ def handler(request, context):
 
         if action_type == 'post':
             (
-                outcome_name,
-                outcome_type,
+                post_outcome_name,
+                post_outcome_type,
                 outcome_response_spec,
                 method_params
             ) = process_post_action(action, request, parameters, log_event)
+            outcome_name = outcome_name + '.' + post_outcome_name
+            outcome_type = post_outcome_type
+            
             if outcome_response_spec is not None:
                 response_spec = outcome_response_spec
         else:

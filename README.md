@@ -32,9 +32,7 @@ CODE_BUCKET=TODO_YOUR_S3_BUCKET
 
 STACK_NAME=SfnCallbackUrls
 
-sam build
-sam package --output-template-file packaged-template.yaml --s3-bucket $CODE_BUCKET
-sam deploy --template-file packaged-template.yaml --capabilities CAPABILITY_IAM --stack-name $STACK_NAME
+sam build && sam package --output-template-file packaged-template.yaml --s3-bucket $CODE_BUCKET && sam deploy --template-file packaged-template.yaml --capabilities CAPABILITY_IAM --stack-name $STACK_NAME
 
 # *** Now, let's get to it ***
 
@@ -103,27 +101,31 @@ managed policy found as the `Policy` output of the CloudFormation stack.
 ```json5
 {
     "token": "<the token from Step Functions>", // required
-    "actions": { // you must provide at least one action
-        "<a name for this action>": {
+    "actions": [ // you must provide at least one action
+        {
+            "name": "<a name for this action>",
             "type": "success", // this action will cause SendTaskSuccess
             "output": { // required, can be any JSON type
                 "<your>": "<content>"
             },
             "response": {} // optional, see below
         },
-        "<name2>": { // can have as many actions of the same type as you want
+        { // can have as many actions of the same type as you want
+            "name": "<name2>",
             "type": "success",
             "output": "<a different output>"
         },
-        "<name3>": {
+        {
+            "name": "<name3>",
             "type": "failure",  // this action will cause SendTaskFailure
             "error": "<your error code>", // optional
             "cause": "<your error cause>" // optional
         },
-        "<name4>": {
+        {
+            "name": "<name4>",
             "type": "heartbeat" // this action will cause SendTaskHeartbeat (can invoke this type of callback more than once)
         }
-    },
+    ],
     "expiration": "<ISO8601-formatted expiration>", // optional
     "enable_output_parameters": true // optional, and must be enabled on the stack, see below
 }
@@ -148,13 +150,18 @@ In every action, you can provide a response specification in the `response` fiel
 ```json5
 {
     "redirect": "https://example.com", // if the callback is successful, redirect the user to the given URL
+}
+```
+or this:
+```json5
+{
     "json": {"hello": "world"}, // choose the JSON object returned by the callback for the application/json content-type
     "html": "<html>hello, world</html>", // choose the body returned by the callback for the text/html content-type
     "text": "hello, world" // choose the body returned by the callback for the text/plain content-type
 }
 ```
 
-All fields are optional, and are only used when the callback is successful; all errors return fixed content.
+All fields are optional, and are only used when the callback is successfully processed; all errors return fixed content.
 `redirect` takes precedence over the other fields.
 
 ### Expiration

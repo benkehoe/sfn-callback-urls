@@ -79,19 +79,25 @@ def _process_post_action(action, body, parameters, log_event={}):
         except jsonschema.ValidationError as e:
             continue
         
-        outcome_name = outcome_name + '.' + outcome['name']
+        outcome_name = outcome['name']
         outcome_type = outcome['type']
         
         log_event['post_outcome_index'] = outcome_index
         
         response_spec = outcome.get('response')
+
+        if outcome.get('output_body', False):
+            outcome['output'] = body
         
-        outcome_action_data = {}
-        for key in ['output', 'error', 'cause']:
-            if key in outcome:
-                path = outcome[key]
-                outcome_action_data[key] = body[path] #TODO: JSON path
-        method_params = prepare_method_params(outcome, parameters, log_event=log_event)    
+        # TODO: JSONPath
+        # for key in ['output', 'error', 'cause']:
+        #     path_key = f'{key}_path'
+        #     if path_key in outcome:
+        #         path = outcome[path_key]
+        #         outcome[key] = jsonpath(body, path)
+        
+        method_params = prepare_method_params(outcome, parameters, log_event=log_event)
+        break
     else:
         raise InvalidPostActionBody('Body does not match any outcome')
     
