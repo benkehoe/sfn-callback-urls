@@ -74,7 +74,7 @@ Resources:
                     "Parameters": {
                         "FunctionName": "${GlueFunction}",
                         "Payload": {
-                            "state.$": "$$.State.Name",
+                            "step.$": "$$.State.Name",
                             "name_in_input.$": "$.name",
                             "token.$": "$$.Task.Token"
                         }
@@ -95,7 +95,7 @@ Resources:
                     "Parameters": {
                         "FunctionName": "${GlueFunction}",
                         "Payload": {
-                            "state.$": "$$.State.Name",
+                            "step.$": "$$.State.Name",
                             "output.$": "$.output"
                         }
                     },
@@ -110,7 +110,7 @@ Resources:
     Properties:
       Runtime: python3.6
       Role: !GetAtt GlueFunctionRole.Arn
-      Handler: index.handler
+      Handler: index.lambda_handler
       Environment:
         Variables:
           CREATE_URLS_FUNCTION_NAME: !Ref CreateUrlsFunction
@@ -118,9 +118,9 @@ Resources:
       Code: 
         ZipFile: |
           import json, os, boto3
-          def handler(event, context):
+          def lambda_handler(event, context):
               print('Event:', json.dumps(event))
-              if event['state'] == 'SendApprovalRequest':
+              if event['step'] == 'SendApprovalRequest':
                   input = {
                       "token": event['token'],
                       "actions": [
@@ -161,7 +161,7 @@ Resources:
                       approve=urls['approve'],
                       reject=urls['reject']
                   )
-              elif event['state'] == 'SendConfirmation':
+              elif event['step'] == 'SendConfirmation':
                   email_subject = 'Step Functions example complete'
 
                   if 'Error' in event['output']:
