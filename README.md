@@ -51,7 +51,7 @@ aws cloudformation deploy --template-file example/template.yaml --stack-name Sfn
 STATE_MACHINE=$(aws cloudformation describe-stacks --stack-name SfnCallbackUrlsExample --query "Stacks[0].Outputs[?OutputKey=='StateMachine'].OutputValue" --output text)
 
 # Run the example state machine
-aws step-functions start-execution --state-machine-arn $STATE_MACHINE --input "{\"name\": \"$NAME\"}"
+aws stepfunctions start-execution --state-machine-arn $STATE_MACHINE --input "{\"name\": \"$NAME\"}"
 
 # Now you will get an approve/reject email, followed by a confirmation of the same
 
