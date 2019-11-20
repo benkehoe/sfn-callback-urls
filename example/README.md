@@ -20,5 +20,5 @@ aws cloudformation deploy --template-file template.yaml --stack-name $EXAMPLE_ST
 
 STATE_MACHINE=$(aws cloudformation describe-stacks --stack-name $EXAMPLE_STACK_NAME --query "Stacks[0].Outputs[?OutputKey=='StateMachine'].OutputValue" --output text)
 
-aws step-functions start-execution --state-machine-arn $STATE_MACHINE --input "{\"name\": \"$NAME\"}"
+aws stepfunctions start-execution --state-machine-arn $STATE_MACHINE --input "{\"name\": \"$NAME\"}"
 ```
