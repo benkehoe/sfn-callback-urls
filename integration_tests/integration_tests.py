@@ -88,7 +88,7 @@ def drain(resources, session):
         if not response.get('nextToken'):
             break
         next_token = response['nextToken']
-    
+
     print(f'Draining queue...')
     while True:
         max_messages = 10
@@ -101,7 +101,7 @@ def drain(resources, session):
             message.delete()
         if len(messages) < max_messages:
             break
-    
+
     print('Done')
 
 StateMachineExecution = namedtuple('StateMachineExecution', ['correlation_id', 'token', 'execution_arn'])
@@ -114,7 +114,7 @@ def state_machine_execution(resources, session):
     print(f'Correlation id: {correlation_id}')
 
     execution_input = {"cid_in": correlation_id}
-    
+
     print(f'Starting state machine with input {json.dumps(execution_input)}')
     response = step_functions.start_execution(
         stateMachineArn=resources.state_machine_arn,
@@ -138,7 +138,7 @@ def state_machine_execution(resources, session):
     payload = json.loads(message.body)
 
     print(f'Message payload: {payload}')
-    
+
     payload_input = payload['Input']
     assert_dicts_equal(payload_input, execution_input)
 
@@ -232,7 +232,7 @@ def _run_test(
                 return_raw_response=return_raw_create_urls_response)
     else:
         raise ValueError(f'bad create_with {create_with}')
-    
+
     if end_after == 'create_urls':
         return _TestRunOutput(create_urls_response, None, None)
 
@@ -246,6 +246,7 @@ def _run_test(
         kwargs = {}
         if post_body:
             kwargs['json'] = post_body
+            kwargs['headers'] = {'content-type': 'application/json;charset=utf-8'}
         callback_response = requests.post(url, **kwargs)
     elif callback_method == 'get':
         callback_response = requests.get(url)
@@ -255,7 +256,10 @@ def _run_test(
     print(f'Response status: {callback_response.status_code}')
     if callback_response.status_code != 200:
         print(f'Response headers: {callback_response.headers}')
-    print(f'Response body: {json.dumps(callback_response.json(), indent=2)}')
+    try:
+        print(f'Response body: {json.dumps(callback_response.json(), indent=2)}')
+    except json.decoder.JSONDecodeError:
+        print(f'Response body: {callback_response.text}')
 
     if end_after == 'callback':
         return _TestRunOutput(create_urls_response, callback_response, None)
@@ -297,11 +301,11 @@ class Actions:
             if response is not None:
                 action['response'] = response
             super().__init__(action.items())
-        
+
         def validate(self, response):
             assert response["status"] == 'SUCCEEDED'
             assert_dicts_equal(json.loads(response["output"]), self['output'])
-    
+
     class failure(dict):
         def __init__(self, name, error=None, cause=None, response=None):
             action = {
@@ -315,7 +319,7 @@ class Actions:
             if response is not None:
                 action['response'] = response
             super().__init__(action.items())
-        
+
         def validate(self, response):
             assert response["status"] == 'FAILED'
             #TODO: how to find the error and cause?
@@ -329,10 +333,10 @@ class Actions:
             if response is not None:
                 action['response'] = response
             super().__init__(action.items())
-        
+
         def validate(self, response):
             assert response["status"] == 'RUNNING'
-    
+
     class post(dict):
         def __init__(self, name, outcomes, response=None):
             action = {
@@ -343,7 +347,7 @@ class Actions:
             if response is not None:
                 action['response'] = response
             super().__init__(action.items())
-        
+
         class Outcomes:
             class success(dict):
                 def __init__(self, name, schema, output, response=None):
@@ -357,7 +361,7 @@ class Actions:
                     if response is not None:
                         action['response'] = response
                     super().__init__(action.items())
-            
+
             class failure(dict):
                 def __init__(self, name, schema, error=None, cause=None, response=None):
                     action = {
@@ -374,14 +378,14 @@ class Actions:
                     if response is not None:
                         action['response'] = response
                     super().__init__(action.items())
-            
+
 def test_basic_success(state_machine_execution, resources, session, drain):
     action_name = uuid.uuid4().hex
     task_output = {"cid_out": state_machine_execution.correlation_id}
     actions = [
         Actions.success(action_name, task_output)
     ]
-    
+
     _run_test(
         state_machine_execution, resources, session,
         actions=actions,
@@ -392,7 +396,7 @@ def test_basic_failure(state_machine_execution, resources, session, drain):
     actions = [
         Actions.failure(action_name)
     ]
-    
+
     _run_test(
         state_machine_execution, resources, session,
         actions=actions,
@@ -404,7 +408,7 @@ def test_call_twice(state_machine_execution, resources, session, drain):
     actions = [
         Actions.success(action_name, task_output)
     ]
-    
+
     output = _run_test(
         state_machine_execution, resources, session,
         actions=actions,
@@ -426,7 +430,7 @@ def test_call_twice(state_machine_execution, resources, session, drain):
 def test_post_action(state_machine_execution, resources, session, drain):
     action_name = uuid.uuid4().hex
     schema = {
-        
+
     }
     actions = [
         Actions.post(action_name, [
@@ -588,7 +592,7 @@ def test_post_action_schema_select_2(state_machine_execution, resources, session
 def test_post_action_fixed_output(state_machine_execution, resources, session, drain):
     action_name = uuid.uuid4().hex
     schema = {
-        
+
     }
     output = {
         "bar": "foo"

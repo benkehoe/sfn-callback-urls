@@ -27,12 +27,9 @@ STACK_NAME=TODO_DEPLOYED_APP_STACK_NAME
 
 # *** Do this part if you are deploying from source ***
 
-# Set this value
-CODE_BUCKET=TODO_YOUR_S3_BUCKET
-
 STACK_NAME=SfnCallbackUrls
 
-sam build && sam package --output-template-file packaged-template.yaml --s3-bucket $CODE_BUCKET && sam deploy --template-file packaged-template.yaml --capabilities CAPABILITY_IAM --stack-name $STACK_NAME
+sam build --use-container && sam deploy --guided --stack-name $STACK_NAME
 
 # *** Now, let's get to it ***
 
@@ -67,7 +64,7 @@ or simply stop the execution entirely and start a new one. Try these approaches 
 By default, `sfn-callback-urls` creates a KMS key to encrypt callback payloads, so that having a callback URL neither
 allows you to inspect the payload nor modify it before using it.
 [**The default costs money!**](https://aws.amazon.com/kms/pricing/). There are two alternatives. If you have your own
-KMS key, you can put the key ARN in the `EncryptionKeyArn` stack parameter, and it will use that instead of 
+KMS key, you can put the key ARN in the `EncryptionKeyArn` stack parameter, and it will use that instead of
 creating one.
 
 If you want to disable encryption entirely, you can set the `DisableEncryption` stack parameter to `true`.
@@ -174,13 +171,13 @@ if a callback is made after then, it will be rejected.
 
 If you've got a lot of different potential successful outputs, you may find it easier to parameterize your callbacks.
 This feature is disabled by default due to the security considerations described below; you have to set
-the `EnableOutputParameters` stack parameter to `true`. Then, you must also opt-in when creating URLs by setting 
+the `EnableOutputParameters` stack parameter to `true`. Then, you must also opt-in when creating URLs by setting
 the `enable_output_parameters` field to `true` in your request. Any URLs created without `enable_output_parameters`
 set to `true` will not use parameterized output when the callbacks are processed. If `EnableOutputParameters` is
 changed back to `false`, any previously-created callbacks with parameters enabled will be now rejected.
 
 Once set, any strings in the `output` field for a `success` action, the `error` and `cause` fields for a
-`failure` action, and all the strings in the `response` object are passed through the Python 
+`failure` action, and all the strings in the `response` object are passed through the Python
 [string.Template.substitute](https://docs.python.org/3.4/library/string.html#template-strings) function,
 using all the query parameters except for the payload. In addition to the `action` and `name` query parameters
 that are already there, you can use your own field name in your strings, and append values to the callback URL
@@ -245,12 +242,12 @@ you can do this with `post` actions. A post action has a non-empty list of *outc
 actions with a few extra fields. Each outcome has a *name* and a *type*, where the type is one of
 `success`, `failure`, or `heartbeat`.
 
-Each outcome has a *schema*, which must be a [JSON Schema](https://json-schema.org/) that will be evaluated 
+Each outcome has a *schema*, which must be a [JSON Schema](https://json-schema.org/) that will be evaluated
 against the POST body. The first outcome whose schema validates against the body will used. If no schema
 matches the POST body, the callback results in an error.
 
 Like in an action, a `success` outcome can include an `output` field, and a `failure` outcome can have
-`error` and `cause`; these are fixed values. To use the entire body of the request as the output for 
+`error` and `cause`; these are fixed values. To use the entire body of the request as the output for
 a `success` outcome, use `"output_body": true` in your outcome.
 To select information from the request body, you can use `output_path` to specify a
 [JSONPath](https://github.com/kennknowles/python-jsonpath-rw#jsonpath-syntax). Because JSONPath expressions

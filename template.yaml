@@ -16,6 +16,7 @@ Transform: 'AWS::Serverless-2016-10-31'
 Metadata:
   AWS::ServerlessRepo::Application:
     Name: sfn-callback-urls
+    SemanticVersion: 1.1.0
     Description: Easy handling of Step Function tokens as callback URLs
     Author: Ben Kehoe
     Labels:
@@ -26,8 +27,10 @@ Metadata:
     LicenseUrl: LICENSE
     ReadmeUrl: README.md
     HomePageUrl: https://github.com/benkehoe/sfn-callback-urls
-    SemanticVersion: 1.0.0
     SourceCodeUrl: https://github.com/benkehoe/sfn-callback-urls
+Globals:
+  Function:
+    Runtime: python3.8
 Parameters:
   DisableEncryption:
     Description: Disable encryption for callback payloads
@@ -122,7 +125,7 @@ Resources:
         Type: AWS_PROXY
         IntegrationHttpMethod: POST
         Uri: !Sub "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:${CreateUrlsForApi}/invocations"
-  
+
   CreateUrlsInvokePermission:
     Type: AWS::Lambda::Permission
     Properties:
@@ -193,7 +196,7 @@ Resources:
       PolicyName: LambdaLogging
       PolicyDocument:
         Version: "2012-10-17"
-        Statement: 
+        Statement:
           - Effect: Allow
             Action:
               - "logs:CreateLogStream"
@@ -212,7 +215,6 @@ Resources:
     Type: 'AWS::Serverless::Function'
     Properties:
       CodeUri: ./src
-      Runtime: python3.6
       Handler: create_urls.api_handler
       Role: !GetAtt CreateUrlsRole.Arn
       MemorySize: 1024
@@ -221,7 +223,7 @@ Resources:
           DISABLE_OUTPUT_PARAMETERS: {"Fn::If": [OutputParametersDisabled, "true", "false"]}
           DISABLE_POST_ACTIONS: {"Fn::If": [PostActionsDisabled, "true", "false"]}
           VERBOSE: {"Fn::If": [VerboseLoggingEnabled, "true", "false"]}
-          KEY_ID: 
+          KEY_ID:
             "Fn::If":
               - EncryptionEnabled
               - "Fn::If":
@@ -229,12 +231,11 @@ Resources:
                   - !Ref EncryptionKey
                   - !Ref EncryptionKeyArn
               - !Ref AWS::NoValue
-  
+
   CreateUrls:
     Type: 'AWS::Serverless::Function'
     Properties:
       CodeUri: ./src
-      Runtime: python3.6
       Handler: create_urls.direct_handler
       Role: !GetAtt CreateUrlsRole.Arn
       MemorySize: 1024
@@ -245,7 +246,7 @@ Resources:
           VERBOSE: {"Fn::If": [VerboseLoggingEnabled, "true", "false"]}
           API_ID: !Ref Api
           STAGE: !Ref ApiStage
-          KEY_ID: 
+          KEY_ID:
             "Fn::If":
               - EncryptionEnabled
               - "Fn::If":
@@ -253,7 +254,7 @@ Resources:
                   - !Ref EncryptionKey
                   - !Ref EncryptionKeyArn
               - !Ref AWS::NoValue
-  
+
   ProcessCallbackRole:
     Type: AWS::IAM::Role
     Properties:
@@ -279,14 +280,14 @@ Resources:
       PolicyName: AccessSfn
       PolicyDocument:
         Version: "2012-10-17"
-        Statement: 
+        Statement:
           - Effect: Allow
             Action:
               - "states:SendTaskSuccess"
               - "states:SendTaskFailure"
               - "states:SendTaskHeartbeat"
             Resource: "*"
-    
+
   ProcessCallbackLogsPolicy:
     Type: AWS::IAM::Policy
     Properties:
@@ -295,7 +296,7 @@ Resources:
       PolicyName: LambdaLogging
       PolicyDocument:
         Version: "2012-10-17"
-        Statement: 
+        Statement:
           - Effect: Allow
             Action:
               - "logs:CreateLogStream"
@@ -310,7 +311,6 @@ Resources:
     Type: 'AWS::Serverless::Function'
     Properties:
       CodeUri: ./src
-      Runtime: python3.6
       Handler: process_callback.handler
       Role: !GetAtt ProcessCallbackRole.Arn
       MemorySize: 1024
@@ -328,7 +328,7 @@ Resources:
                   - !Ref EncryptionKey
                   - !Ref EncryptionKeyArn
               - !Ref AWS::NoValue
-  
+
   ApiDeployment:
     Type: AWS::ApiGateway::Deployment
     DependsOn:
@@ -337,14 +337,14 @@ Resources:
       - ProcessCallbackPostMethod
     Properties:
       RestApiId: !Ref Api
-  
+
   ApiStage:
     Type: AWS::ApiGateway::Stage
     Properties:
       RestApiId: !Ref Api
       StageName: v1
       DeploymentId: !Ref ApiDeployment
-  
+
   EncryptionKey:
     Type: AWS::KMS::Key
     Condition: CreateKey
@@ -361,7 +361,7 @@ Resources:
             "Resource": "*"
           }]
         }
-  
+
   EncryptionKeyPolicy:
     Type: AWS::IAM::Policy
     Condition: EncryptionEnabled

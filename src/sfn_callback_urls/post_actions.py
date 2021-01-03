@@ -27,7 +27,7 @@ def validate_post_action(action):
             raise InvalidPostActionOutcome(f'Bad schema: {str(e)}')
         except Exception as e:
             raise InvalidPostActionOutcome(f'Bad schema: {str(e)}')
-        
+
         for key in ['output_path', 'error_path', 'cause_path']:
             if key in outcome:
                 try:
@@ -45,8 +45,9 @@ def load_post_action_body(request, log_event={}):
                 'Allow': 'POST'
             }
         )
-    
-    if get_header(request, 'content-type') == 'application/json':
+
+    content_type = get_header(request, 'content-type')
+    if content_type and content_type.split(';')[0].strip() == 'application/json':
         try:
             return json.loads(request['body'])
         except json.JSONDecodeError as e:
@@ -72,23 +73,23 @@ def load_post_action_body(request, log_event={}):
 
 def _process_post_action(action, body, parameters, log_event={}):
     outcomes = action['outcomes']
-    
+
     log_event['post_outcome_names'] = [o['name'] for o in outcomes]
     log_event['post_outcome_types'] = [o['type'] for o in outcomes]
     log_event['post_outcomes_num'] = len(outcomes)
-    
+
     for outcome_index, outcome in enumerate(outcomes):
         outcome_body_schema = outcome['schema']
         try:
             jsonschema.validate(body, outcome_body_schema)
         except jsonschema.ValidationError as e:
             continue
-        
+
         outcome_name = outcome['name']
         outcome_type = outcome['type']
-        
+
         log_event['post_outcome_index'] = outcome_index
-        
+
         response_spec = outcome.get('response')
 
         if outcome.get('output_body', False):
@@ -103,11 +104,11 @@ def _process_post_action(action, body, parameters, log_event={}):
                     path = jsonpath_rw.parse(outcome['output_path'])
                 except Exception as e:
                     raise InvalidJsonPath(f'Invalid JSONPath: {str(e)}')
-                
+
                 log_event['output_path'] = outcome['output_path']
 
                 outcome['output'] = [v.value for v in path.find(body)]
-        
+
         for key in ['error', 'cause']:
             path_key = f'{key}_path'
             if path_key in outcome:
@@ -123,12 +124,12 @@ def _process_post_action(action, body, parameters, log_event={}):
                 else:
                     value = value[0]
                 outcome[key] = value
-        
+
         method_params = prepare_method_params(outcome, parameters, log_event=log_event)
         break
     else:
         raise InvalidPostActionBody('Body does not match any outcome')
-    
+
     return (
         outcome_name,
         outcome_type,
@@ -139,10 +140,10 @@ def _process_post_action(action, body, parameters, log_event={}):
 def process_post_action(action, request, parameters, log_event={}):
     if get_disable_post_actions():
         raise PostActionsDisabled('Post actions are disabled')
-    
+
     body = load_post_action_body(request, log_event)
 
     if is_verbose():
         print(f'Post body: {json.dumps(body)}')
-    
+
     return _process_post_action(action, body, parameters, log_event=log_event)

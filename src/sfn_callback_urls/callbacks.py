@@ -42,7 +42,7 @@ def get_api_gateway_url(api_id, stage_id, region):
 def get_url(base_url, action_name, action_type, payload, log_event={}):
     if base_url.endswith('/'):
         base_url = base_url[:-1]
-    
+
     query = urllib.parse.urlencode([
         (ACTION_NAME_QUERY_PARAM, action_name),
         (ACTION_TYPE_QUERY_PARAM, action_type),
@@ -66,7 +66,7 @@ def load_from_request(request):
 
     if PAYLOAD_QUERY_PARAM not in query_parameters:
         raise InvalidPayload('Missing payload')
-    
+
     payload = query_parameters[PAYLOAD_QUERY_PARAM]
 
     # for parameterizing the output, grab everything in the
@@ -75,7 +75,7 @@ def load_from_request(request):
     for k, v in query_parameters.items():
         if k not in [PAYLOAD_QUERY_PARAM]:
             parameters[k] = v
-    
+
     return action_name, action_type, payload, parameters
 
 def prepare_method_params(action, parameters, log_event={}):
@@ -89,14 +89,14 @@ def prepare_method_params(action, parameters, log_event={}):
         for key in ['error', 'cause']:
             if key in action:
                 method_params[key] = format_output(action[key], parameters)
-    
+
     return method_params
 
 def format_output(output, parameters):
     # Apply string templating to all strings contained within output (recursively)
     if parameters is None:
         return output
-    
+
     if isinstance(output, dict):
         return dict(
             (
@@ -144,7 +144,7 @@ def format_response(status_code, response, request, response_spec, parameters, l
     else:
         json_override = False
         json_body = json.dumps(response)
-    
+
     if 'html' in response_spec:
         html_override = True
         html_body = format_output(response_spec['html'], parameters)
@@ -158,7 +158,7 @@ def format_response(status_code, response, request, response_spec, parameters, l
             message = message,
             json=json.dumps(response, indent=2)
         )
-    
+
     if 'text' in response_spec:
         text_override = True
         text_body = format_output(response_spec['text'], parameters)
@@ -167,7 +167,7 @@ def format_response(status_code, response, request, response_spec, parameters, l
         text_body = json.dumps(response, indent=2)
 
     content_type = None
-    
+
     accept = get_header(request, 'Accept')
     if accept:
         for value in accept.split(','):
@@ -176,10 +176,10 @@ def format_response(status_code, response, request, response_spec, parameters, l
                 content_type = value
                 break
     log_event['accept'] = content_type
-    
+
     if content_type is None:
         content_type = 'application/json'
-    
+
     if content_type == 'application/json':
         if json_override:
             log_event['response_override'] = 'json'
@@ -200,5 +200,5 @@ def format_response(status_code, response, request, response_spec, parameters, l
         },
         'body': body
     }
-    
+
 
