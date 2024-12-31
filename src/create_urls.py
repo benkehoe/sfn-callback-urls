@@ -27,7 +27,7 @@ import botocore.exceptions
 import aws_encryption_sdk
 import jsonschema
 
-from sfn_callback_urls.payload import PayloadBuilder, encode_payload
+from sfn_callback_urls.payload import PayloadBuilder, encode_payload, get_keyring
 from sfn_callback_urls.callbacks import get_api_gateway_url, get_url
 from sfn_callback_urls.common import send_log_event, get_header, is_verbose, get_disable_post_actions
 from sfn_callback_urls.post_actions import validate_post_action
@@ -45,12 +45,11 @@ from sfn_callback_urls.schemas.create_urls import create_urls_input_schema
 # See schemas.create_urls for example event
 
 BOTO3_SESSION = boto3.Session()
-MASTER_KEY_PROVIDER = None
-if 'KEY_ID' in os.environ:
-    MASTER_KEY_PROVIDER = aws_encryption_sdk.KMSMasterKeyProvider(
-        key_ids = [os.environ['KEY_ID']],
-        botocore_session = BOTO3_SESSION._session
-    )
+KEYRING = None
+ENCRYPTION_CLIENT = None
+if 'KEY_ARN' in os.environ:
+    KEYRING = get_keyring(BOTO3_SESSION, os.environ['KEY_ARN'])
+    ENCRYPTION_CLIENT = aws_encryption_sdk.EncryptionSDKClient(commitment_policy=aws_encryption_sdk.CommitmentPolicy.REQUIRE_ENCRYPT_REQUIRE_DECRYPT)
 
 DefaultApiInfo = namedtuple('DefaultApiInfo', ['region', 'api_id', 'stage'])
 
@@ -64,7 +63,7 @@ def direct_handler(event, context):
 
     def response_formatter(statusCode, headers, body):
         return body
-    
+
     return process_event(event, context, default_api_info, response_formatter)
 
 def api_handler(event, context):
@@ -97,7 +96,7 @@ def api_handler(event, context):
                 'Allow': 'POST'
             }
         }
-    
+
     # Require JSON content type
     if get_header(event, 'content-type') != 'application/json':
         return {
@@ -106,7 +105,7 @@ def api_handler(event, context):
 
             }
         }
-    
+
     try:
         event = json.loads(event['body'])
     except json.JSONDecodeError as e:
@@ -120,13 +119,13 @@ def api_handler(event, context):
                 'message': f'{str(e)}',
             })
         }
-    
+
     return process_event(event, context, default_api_info, response_formatter)
 
 def process_event(event, context, default_api_info, response_formatter):
     if is_verbose():
         print(f'Input: {event}')
-        
+
     try:
         jsonschema.validate(event, create_urls_input_schema)
     except jsonschema.ValidationError as e:
@@ -163,7 +162,7 @@ def process_event(event, context, default_api_info, response_formatter):
             api_id = default_api_info.api_id
             stage = default_api_info.stage
             base_url = get_api_gateway_url(api_id, stage, region)
-        
+
         log_event.update({
             'api_id': api_id,
             'stage': stage,
@@ -174,7 +173,7 @@ def process_event(event, context, default_api_info, response_formatter):
             'transaction_id': transaction_id,
             'urls': {},
         }
-        
+
         expiration = None
         if 'expiration' in event:
             try:
@@ -186,7 +185,7 @@ def process_event(event, context, default_api_info, response_formatter):
             if expiration_delta <= 0:
                 raise InvalidDate('Expiration is in the past')
             response['expiration'] = expiration.isoformat()
-        
+
         payload_builder = PayloadBuilder(transaction_id, timestamp, event['token'],
             enable_output_parameters=event.get('enable_output_parameters'),
             expiration=expiration,
@@ -211,17 +210,17 @@ def process_event(event, context, default_api_info, response_formatter):
                 log_event['redirect'] = True
             elif any(v in action_response for v in ['json', 'html', 'text']):
                 log_event['response_override'] = True
-            
+
             payload = payload_builder.build(action,
                     log_event=log_event)
 
-            encoded_payload = encode_payload(payload, MASTER_KEY_PROVIDER)
+            encoded_payload = encode_payload(payload, encryption_client=ENCRYPTION_CLIENT, keyring=KEYRING)
 
             response['urls'][action_name] = get_url(
                     base_url, action_name, action_type, encoded_payload, log_event=log_event)
 
         log_event['actions'] = actions_for_log
-        
+
         return_value = response_formatter(200, {}, response)
 
         send_log_event(log_event)

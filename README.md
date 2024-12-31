@@ -29,6 +29,7 @@ STACK_NAME=TODO_DEPLOYED_APP_STACK_NAME
 
 STACK_NAME=SfnCallbackUrls
 
+# Install the SAM CLI https://docs.aws.amazon.com/serverless-application-model/latest/developerguide/install-sam-cli.html
 sam build --use-container && sam deploy --guided --stack-name $STACK_NAME
 
 # *** Now, let's get to it ***

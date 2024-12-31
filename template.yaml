@@ -14,23 +14,13 @@
 
 Transform: 'AWS::Serverless-2016-10-31'
 Metadata:
-  AWS::ServerlessRepo::Application:
-    Name: sfn-callback-urls
-    SemanticVersion: 1.1.0
-    Description: Easy handling of Step Function tokens as callback URLs
-    Author: Ben Kehoe
-    Labels:
-      - stepfunctions
-      - callback
-      - email
-    SpdxLicenseId: Apache-2.0
-    LicenseUrl: LICENSE
-    ReadmeUrl: README.md
-    HomePageUrl: https://github.com/benkehoe/sfn-callback-urls
-    SourceCodeUrl: https://github.com/benkehoe/sfn-callback-urls
+  cfn-lint:
+    config:
+      ignore_checks:
+      - E3510 # KMS key ARN default value of "NONE" (intentionally not a valid ARN) causes this error
 Globals:
   Function:
-    Runtime: python3.8
+    Runtime: python3.12
 Parameters:
   DisableEncryption:
     Description: Disable encryption for callback payloads
@@ -223,12 +213,12 @@ Resources:
           DISABLE_OUTPUT_PARAMETERS: {"Fn::If": [OutputParametersDisabled, "true", "false"]}
           DISABLE_POST_ACTIONS: {"Fn::If": [PostActionsDisabled, "true", "false"]}
           VERBOSE: {"Fn::If": [VerboseLoggingEnabled, "true", "false"]}
-          KEY_ID:
+          KEY_ARN:
             "Fn::If":
               - EncryptionEnabled
               - "Fn::If":
                   - CreateKey
-                  - !Ref EncryptionKey
+                  - !GetAtt EncryptionKey.Arn
                   - !Ref EncryptionKeyArn
               - !Ref AWS::NoValue
 
@@ -246,12 +236,12 @@ Resources:
           VERBOSE: {"Fn::If": [VerboseLoggingEnabled, "true", "false"]}
           API_ID: !Ref Api
           STAGE: !Ref ApiStage
-          KEY_ID:
+          KEY_ARN:
             "Fn::If":
               - EncryptionEnabled
               - "Fn::If":
                   - CreateKey
-                  - !Ref EncryptionKey
+                  - !GetAtt EncryptionKey.Arn
                   - !Ref EncryptionKeyArn
               - !Ref AWS::NoValue
 
@@ -320,12 +310,12 @@ Resources:
           DISABLE_OUTPUT_PARAMETERS: {"Fn::If": [OutputParametersDisabled, "true", "false"]}
           DISABLE_POST_ACTIONS: {"Fn::If": [PostActionsDisabled, "true", "false"]}
           VERBOSE: {"Fn::If": [VerboseLoggingEnabled, "true", "false"]}
-          KEY_ID:
+          KEY_ARN:
             "Fn::If":
               - EncryptionEnabled
               - "Fn::If":
                   - CreateKey
-                  - !Ref EncryptionKey
+                  - !GetAtt EncryptionKey.Arn
                   - !Ref EncryptionKeyArn
               - !Ref AWS::NoValue
 

@@ -35,7 +35,8 @@ from sfn_callback_urls.callbacks import (
 from sfn_callback_urls.payload import (
     decode_payload,
     validate_payload_schema,
-    validate_payload_expiration
+    validate_payload_expiration,
+    get_keyring
 )
 from sfn_callback_urls.post_actions import (
     load_post_action_body,
@@ -61,12 +62,11 @@ from sfn_callback_urls.exceptions import (
 
 BOTO3_SESSION = boto3.Session()
 STEP_FUNCTIONS_CLIENT = BOTO3_SESSION.client('stepfunctions')
-MASTER_KEY_PROVIDER = None
-if 'KEY_ID' in os.environ:
-    MASTER_KEY_PROVIDER = aws_encryption_sdk.KMSMasterKeyProvider(
-        key_ids = [os.environ['KEY_ID']],
-        botocore_session = BOTO3_SESSION._session
-    )
+KEYRING = None
+ENCRYPTION_CLIENT = None
+if 'KEY_ARN' in os.environ:
+    KEYRING = get_keyring(BOTO3_SESSION, os.environ['KEY_ARN'])
+    ENCRYPTION_CLIENT = aws_encryption_sdk.EncryptionSDKClient(commitment_policy=aws_encryption_sdk.CommitmentPolicy.REQUIRE_ENCRYPT_REQUIRE_DECRYPT)
 
 def handler(request, context):
     if is_verbose():
@@ -89,7 +89,7 @@ def handler(request, context):
         ) = load_from_request(request)
 
         decode_start = time.perf_counter()
-        payload = decode_payload(encoded_payload, MASTER_KEY_PROVIDER)
+        payload = decode_payload(encoded_payload, encryption_client=ENCRYPTION_CLIENT, keyring=KEYRING)
         decode_finish = time.perf_counter()
         log_event['decode_time'] = (decode_finish - decode_start)
 
@@ -97,13 +97,13 @@ def handler(request, context):
 
         if is_verbose():
             print(f'Payload: {json.dumps(payload)}')
-        
+
         # use the same transaction id given out in the create urls call
         log_event['transaction_id'] = payload['tid']
         response['transaction_id'] = payload['tid']
-        
+
         validate_payload_expiration(payload, timestamp)
-        
+
         # we put the action name and type in the query string directly for convenience
         # but we only trust the version that's in the payload. If the query string
         # versions differ from the payload, something funny is going on and we reject
@@ -137,7 +137,7 @@ def handler(request, context):
             raise ParametersDisabled('Parameters are disabled')
         if not use_parameters:
             parameters = None
-        
+
         action = payload['action']
 
         response_spec = action.get('response', {})
@@ -154,12 +154,12 @@ def handler(request, context):
             ) = process_post_action(action, request, parameters, log_event)
             outcome_name = outcome_name + '.' + post_outcome_name
             outcome_type = post_outcome_type
-            
+
             if outcome_response_spec is not None:
                 response_spec = outcome_response_spec
         else:
             method_params = prepare_method_params(action, parameters, log_event=log_event)
-        
+
         log_event['outcome_name'] = outcome_name
         log_event['outcome_type'] = outcome_type
 

@@ -6,9 +6,9 @@ name = "pypi"
 [packages]
 python-dateutil = "*"
 "boto3" = "*"
-aws-encryption-sdk = "*"
 jsonschema = ">=3.0.1"
 jsonpath-rw = "*"
+aws-encryption-sdk = {version = ">=4.0, <5", extras = ["mpl"]}
 
 [dev-packages]
 pylint = "*"
@@ -17,8 +17,7 @@ pytest = "*"
 "requests-aws4auth" = "*"
 rope = "*"
 aws-encryption-sdk-cli = "*"
-aws-sam-cli = "*"
 requests = "*"
 
 [requires]
-python_version = "3.8"
+python_version = "3.12"

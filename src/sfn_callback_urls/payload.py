@@ -19,6 +19,7 @@ import json
 import datetime
 
 import aws_encryption_sdk
+import aws_cryptographic_material_providers.mpl
 import jsonschema
 
 from .common import get_force_disable_parameters
@@ -34,10 +35,26 @@ from .exceptions import (
 
 from .schemas.payload import payload_schema
 
+def get_keyring(boto_session, key_arn):
+    mat_prov = aws_cryptographic_material_providers.mpl.AwsCryptographicMaterialProviders(
+        config=aws_cryptographic_material_providers.mpl.config.MaterialProvidersConfig()
+    )
+
+    keyring_input = aws_cryptographic_material_providers.mpl.models.CreateAwsKmsKeyringInput(
+        kms_key_id=key_arn,
+        kms_client=boto_session.client("kms")
+    )
+
+    keyring = mat_prov.create_aws_kms_keyring(
+        input=keyring_input
+    )
+
+    return keyring
+
 class PayloadBuilder:
     def __init__(self,
             transaction_id,
-            timestamp, 
+            timestamp,
             token,
             enable_output_parameters=False,
             expiration=None,
@@ -49,7 +66,7 @@ class PayloadBuilder:
         self.expiration = expiration
 
         self.issuer = issuer
-    
+
     def build(self, action, log_event={}):
         payload = {
             'token': self.token,
@@ -60,9 +77,9 @@ class PayloadBuilder:
             payload['iss'] = self.issuer
         if self.expiration:
             payload['exp'] = int(self.expiration.timestamp())
-        
+
         payload['action'] = action
-        
+
         force_disable_parameters = get_force_disable_parameters()
         log_event['force_disable_parameters'] = force_disable_parameters
         if self.enable_output_parameters:
@@ -74,19 +91,19 @@ class PayloadBuilder:
             else:
                 log_event['parameters_enabled'] = True
                 payload['param'] = True
-        
+
         return payload
 
-def encode_payload(payload, master_key_provider):
+def encode_payload(payload, *, encryption_client, keyring):
     payload_string = json.dumps(payload).encode()
-    
-    if not master_key_provider:
+
+    if not encryption_client:
         return '1-' + str(base64.urlsafe_b64encode(payload_string), 'ascii')
     else:
         try:
-            ciphertext, encryptor_header = aws_encryption_sdk.encrypt(
+            ciphertext, encryptor_header = encryption_client.encrypt(
                 source=payload_string,
-                key_provider=master_key_provider
+                keyring=keyring,
             )
         except aws_encryption_sdk.exceptions.GenerateKeyError as e:
             # This can happen if the key policy does not allow the sfn-callback-urls IAM role
@@ -94,9 +111,9 @@ def encode_payload(payload, master_key_provider):
             raise EncryptionFailed(f'Failed to create DEK; check your key policy ({str(e)})')
         except aws_encryption_sdk.exceptions.AWSEncryptionSDKClientError as e:
             # unexpected, turn into a 500 error
-            raise 
+            raise
 
-        return '2-' + str(base64.urlsafe_b64encode(ciphertext), 'ascii')
+        return '3-' + str(base64.urlsafe_b64encode(ciphertext), 'ascii')
 
 def validate_payload_schema(payload):
     try:
@@ -111,12 +128,12 @@ def validate_payload_expiration(payload, timestamp=None):
         if exp < timestamp:
             raise ExpiredPayload(f'Response expired on {exp.isoformat()}')
 
-def decode_payload(payload, master_key_provider):
+def decode_payload(payload, *, encryption_client, keyring):
     assert isinstance(payload, str)
     parts = payload.split('-', 1)
     if len(parts) != 2:
         raise InvalidPayload('Missing format id')
-    
+
     version, base64_payload = parts
 
     try:
@@ -127,26 +144,28 @@ def decode_payload(payload, master_key_provider):
     if version == '1':
         # sfn-callback-urls to make an authenticated call on behalf of an
         # unauthenticated caller. With encryption turned off, the caller may pass in
-        # a payload that was not created by a create_urls call by an authenticated 
+        # a payload that was not created by a create_urls call by an authenticated
         # caller, and is therefore an opportunity for escalation of privileges.
         # Therefore, we only process unencrypted payloads if encryption is actually disabled.
-        if master_key_provider:
+        if encryption_client:
             raise EncryptionRequired('Only encrypted payloads are supported')
         try:
             loaded_payload = json.loads(binary_payload)
         except json.JSONDecodeError as e:
             raise InvalidPayload(f'JSON error ({str(e)})')
     elif version == '2':
-        if not master_key_provider:
+        raise InvalidPayload('Format 2 not supported') # this version used the AWS Encryption SDK v1, we can't decrypt it here
+    elif version == '3':
+        if not keyring:
             raise DecryptionUnsupported('No key found')
         try:
-            decrypted_payload, decrypted_header = aws_encryption_sdk.decrypt(
+            decrypted_payload, decrypted_header = encryption_client.decrypt(
                 source=binary_payload,
-                key_provider=master_key_provider
+                keyring=keyring
             )
         except aws_encryption_sdk.exceptions.AWSEncryptionSDKClientError as e:
             raise InvalidPayload(f'Decryption error ({type(e).__name__}:{str(e)})')
-        
+
         try:
             loaded_payload = json.loads(decrypted_payload)
         except json.JSONDecodeError as e:

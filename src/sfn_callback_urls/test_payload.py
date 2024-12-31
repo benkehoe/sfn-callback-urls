@@ -26,7 +26,8 @@ from sfn_callback_urls.payload import (
     validate_payload_schema, InvalidPayload,
     validate_payload_expiration, ExpiredPayload,
     encode_payload,
-    decode_payload, DecryptionUnsupported, EncryptionRequired
+    decode_payload, DecryptionUnsupported, EncryptionRequired,
+    get_keyring
 )
 from sfn_callback_urls.common import DISABLE_PARAMETERS_ENV_VAR_NAME
 from sfn_callback_urls.exceptions import ParametersDisabled
@@ -50,7 +51,7 @@ def test_build_basic():
     tid = uuid.uuid4().hex
     ts = datetime.datetime.now()
     token = uuid.uuid4().hex
-    
+
     action = {
         "name": "foo",
         "type": "success",
@@ -75,7 +76,7 @@ def test_build_exp():
     ts = now - datetime.timedelta(seconds=4)
     exp = now - datetime.timedelta(seconds=2)
     token = uuid.uuid4().hex
-    
+
     action = {
         "name": "foo",
         "type": "success",
@@ -101,7 +102,7 @@ def test_build_parameters(monkeypatch):
     tid = uuid.uuid4().hex
     ts = datetime.datetime.now()
     token = uuid.uuid4().hex
-    
+
     action = {
         "name": "foo",
         "type": "success",
@@ -114,7 +115,7 @@ def test_build_parameters(monkeypatch):
         mp.delenv(DISABLE_PARAMETERS_ENV_VAR_NAME, raising=False)
 
         payload = pb.build(action)
-    
+
     with monkeypatch.context() as mp:
         mp.setenv(DISABLE_PARAMETERS_ENV_VAR_NAME, 'true')
 
@@ -138,7 +139,7 @@ def test_validate_payload_basic():
     del payload['action']
     with pytest.raises(InvalidPayload):
         validate_payload_schema(payload_skeleton) # missing action
-    
+
     payload = payload_skeleton.copy()
     with pytest.raises(InvalidPayload):
         validate_payload_schema(payload_skeleton) # missing action type
@@ -192,23 +193,22 @@ def test_basic_payload_coding():
 
     validate_payload_schema(payload)
 
-    encoded_payload = encode_payload(payload, None)
+    encoded_payload = encode_payload(payload, encryption_client=None, keyring=None)
 
-    decoded_payload = decode_payload(encoded_payload, None)
+    decoded_payload = decode_payload(encoded_payload, encryption_client=None, keyring=None)
 
     validate_payload_schema(decoded_payload)
 
     assert_dicts_equal(payload, decoded_payload)
 
-@pytest.mark.skipif('KEY_ID' not in os.environ, reason='Set KEY_ID env var to test encryption')
+@pytest.mark.skipif('KEY_ARN' not in os.environ, reason='Set KEY_ARN env var to test encryption')
 def test_encrypted_payload_coding():
-    key_id = os.environ['KEY_ID']
+    key_arn = os.environ['KEY_ARN']
     session = boto3.Session()
-    
-    mkp = aws_encryption_sdk.KMSMasterKeyProvider(
-        key_ids = [key_id],
-        botocore_session = session._session
-    )
+
+    keyring = get_keyring(session, key_arn)
+
+    client = aws_encryption_sdk.EncryptionSDKClient(commitment_policy=aws_encryption_sdk.CommitmentPolicy.REQUIRE_ENCRYPT_REQUIRE_DECRYPT)
 
     payload = {
         'iss': 'issuer',
@@ -226,18 +226,18 @@ def test_encrypted_payload_coding():
 
     validate_payload_schema(payload)
 
-    encoded_payload = encode_payload(payload, mkp)
-    assert encoded_payload.startswith('2-')
-    decoded_payload = decode_payload(encoded_payload, mkp)
+    encoded_payload = encode_payload(payload, encryption_client=client, keyring=keyring)
+    assert encoded_payload.startswith('3-')
+    decoded_payload = decode_payload(encoded_payload, encryption_client=client, keyring=keyring)
     validate_payload_schema(decoded_payload)
     assert_dicts_equal(payload, decoded_payload)
 
-    encoded_payload = encode_payload(payload, None)
+    encoded_payload = encode_payload(payload, encryption_client=None, keyring=None)
     assert encoded_payload.startswith('1-')
     with pytest.raises(EncryptionRequired):
-        decoded_payload = decode_payload(encoded_payload, mkp)
+        decoded_payload = decode_payload(encoded_payload, encryption_client=client, keyring=keyring)
 
-    encoded_payload = encode_payload(payload, mkp)
-    assert encoded_payload.startswith('2-')
+    encoded_payload = encode_payload(payload, encryption_client=client, keyring=keyring)
+    assert encoded_payload.startswith('3-')
     with pytest.raises(DecryptionUnsupported):
-        decoded_payload = decode_payload(encoded_payload, None)
+        decoded_payload = decode_payload(encoded_payload, encryption_client=None, keyring=None)

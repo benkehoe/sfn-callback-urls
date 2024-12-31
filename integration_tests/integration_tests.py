@@ -210,6 +210,7 @@ def _run_test(
         post_body=None,
         return_raw_create_urls_response=False,
         end_after=None,
+        expected_status_code=None,
         ):
     create_urls_input = {
         'token': state_machine_execution.token,
@@ -260,6 +261,18 @@ def _run_test(
         print(f'Response body: {json.dumps(callback_response.json(), indent=2)}')
     except json.decoder.JSONDecodeError:
         print(f'Response body: {callback_response.text}')
+
+    bad_status_code = (expected_status_code is not None and callback_response.status_code != expected_status_code)
+    bad_status_code |= callback_response.status_code // 100 == 5 # all server-side errors are failures
+
+    if bad_status_code:
+        msg = f"Callback URL returned status {callback_response.status_code}"
+        try:
+            resp = callback_response.json()
+            msg += ": []" + resp["error"] + "] " + resp["message"]
+        except:
+            pass
+        assert False, msg
 
     if end_after == 'callback':
         return _TestRunOutput(create_urls_response, callback_response, None)
@@ -389,6 +402,7 @@ def test_basic_success(state_machine_execution, resources, session, drain):
     _run_test(
         state_machine_execution, resources, session,
         actions=actions,
+        expected_status_code=200,
     )
 
 def test_basic_failure(state_machine_execution, resources, session, drain):
