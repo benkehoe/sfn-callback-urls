@@ -16,7 +16,9 @@ Once you have the token, you call the `sfn-callback-urls` with the token and a s
 a URL for each outcome, which can then be passed on to something deciding the outcome. The chosen outcome URL can then
 be `POST`'d or `GET`'d, and will send that outcome on to Step Functions, completing the task.
 
-# Test it out
+## Test it out
+
+### Deploy the stack
 ```bash
 # *** Do this part if you are deploying from SAR ***
 
@@ -30,26 +32,31 @@ STACK_NAME=TODO_DEPLOYED_APP_STACK_NAME
 STACK_NAME=SfnCallbackUrls
 
 # Install the SAM CLI https://docs.aws.amazon.com/serverless-application-model/latest/developerguide/install-sam-cli.html
-sam build --use-container && sam deploy --guided --stack-name $STACK_NAME
+sam build --use-container && sam deploy --guided --stack-name "$STACK_NAME"
+```
 
-# *** Now, let's get to it ***
+### Deploy and invoke the example
 
+See more details in the [example documentation](example/README.md).
+
+```bash
 # Set these values
-NAME=TODO_YOUR_NAME
-EMAIL=TODO_YOUR_EMAIL
+NAME="TODO_YOUR_NAME"
+EMAIL="TODO_YOUR_EMAIL"
 
 # This gets the Lambda function we call for creating callback URLs
-FUNC=$(aws cloudformation describe-stacks --stack-name $STACK_NAME --query "Stacks[0].Outputs[?OutputKey=='Function'].OutputValue" --output text)
+FUNC=$(aws cloudformation describe-stacks --stack-name "$STACK_NAME" --query "Stacks[0].Outputs[?OutputKey=='Function'].OutputValue" --output text)
 
 # Deploy the example stack
-aws cloudformation deploy --template-file example/template.yaml --stack-name SfnCallbackUrlsExample --parameter-overrides Email=$EMAIL CreateUrlsFunction=$FUNC --capabilities CAPABILITY_IAM
+aws cloudformation deploy --template-file example/template.yaml --stack-name SfnCallbackUrlsExample --parameter-overrides "Email=$EMAIL" "CreateUrlsFunctionArn=$FUNC" --capabilities CAPABILITY_IAM
 
-# Go to your email and confirm the SNS subscription
+# The stack contains an SNS topic subscription for your email address, which requires confirmation
+# Check your email and confirm the SNS subscription
 
 STATE_MACHINE=$(aws cloudformation describe-stacks --stack-name SfnCallbackUrlsExample --query "Stacks[0].Outputs[?OutputKey=='StateMachine'].OutputValue" --output text)
 
 # Run the example state machine
-aws stepfunctions start-execution --state-machine-arn $STATE_MACHINE --input "{\"name\": \"$NAME\"}"
+aws stepfunctions start-execution --state-machine-arn "$STATE_MACHINE" --input "{\"name\": \"$NAME\"}"
 
 # Now you will get an approve/reject email, followed by a confirmation of the same
 
@@ -322,3 +329,9 @@ any previously-created POST action callbacks will be now rejected.
 POST actions allow arbitrary output to be passed into an unauthenticated endpoint, and are therefore
 disabled by default. Users are required to provide a JSON schema to validate the body, but this can be
 the empty schema.
+
+## SnapStart
+
+It can take a couple of seconds to load the AWS Encryption SDK for function cold starts.
+You can reduce this time by enabling [SnapStart](https://docs.aws.amazon.com/lambda/latest/dg/snapstart.html),
+by setting the stack parameter `EnableSnapStart` to `true`.

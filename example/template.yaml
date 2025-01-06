@@ -1,8 +1,11 @@
 Parameters:
   Email:
     Type: String
-  CreateUrlsFunction:
+  CreateUrlsFunctionArn:
     Type: String
+  ApprovalRequestTimeoutSeconds:
+    Type: Number
+    Default: 300 # 5 minutes
 Outputs:
   StateMachine:
     Value: !Ref StateMachine
@@ -13,15 +16,15 @@ Resources:
       Subscription:
       - Protocol: email
         Endpoint: !Ref Email
-  
-  GlueFunctionRole:
+
+  SendApprovalRequestFunctionRole:
     Type: AWS::IAM::Role
     Properties:
       AssumeRolePolicyDocument:
         Version: "2012-10-17"
-        Statement: 
+        Statement:
         - Effect: "Allow"
-          Principal: 
+          Principal:
             Service: "lambda.amazonaws.com"
           Action: "sts:AssumeRole"
       ManagedPolicyArns:
@@ -32,7 +35,27 @@ Resources:
           Statement:
           - Effect: Allow
             Action: lambda:InvokeFunction
-            Resource: !Sub "arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:${CreateUrlsFunction}"
+            Resource: !Ref CreateUrlsFunctionArn
+          - Effect: Allow
+            Action: sns:Publish
+            Resource: !Ref Topic
+
+  SendConfirmationFunctionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+        - Effect: "Allow"
+          Principal:
+            Service: "lambda.amazonaws.com"
+          Action: "sts:AssumeRole"
+      ManagedPolicyArns:
+      - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+      - PolicyName: RolePolicy
+        PolicyDocument:
+          Statement:
           - Effect: Allow
             Action: sns:Publish
             Resource: !Ref Topic
@@ -40,11 +63,11 @@ Resources:
   StateMachineRole:
     Type: AWS::IAM::Role
     Properties:
-      AssumeRolePolicyDocument: 
+      AssumeRolePolicyDocument:
         Version: "2012-10-17"
-        Statement: 
+        Statement:
         - Effect: "Allow"
-          Principal: 
+          Principal:
             Service: "states.amazonaws.com"
           Action: "sts:AssumeRole"
       Policies:
@@ -54,31 +77,34 @@ Resources:
             Statement:
             - Effect: Allow
               Action: lambda:InvokeFunction
-              Resource: !GetAtt GlueFunction.Arn
+              Resource:
+              - !GetAtt SendApprovalRequestFunction.Arn
+              - !GetAtt SendConfirmationFunction.Arn
             - Effect: Allow
               Action: sns:Publish
               Resource: !Ref Topic
-  
+
   StateMachine:
     Type: AWS::StepFunctions::StateMachine
     Properties:
       RoleArn: !GetAtt StateMachineRole.Arn
       DefinitionString: !Sub |
         {
-            "StartAt": "SendApprovalRequest",
+            "StartAt": "RequestApproval",
             "Version": "1.0",
             "States": {
-                "SendApprovalRequest": {
+                "RequestApproval": {
                     "Type": "Task",
+                    "Comment": "Step Functions creates a task token and invokes the SendApprovalRequestFunction lambda with it, which uses sfn-callback-urls to create callback URLs for approve/reject and use SNS to send an approval email with the URLs. When the user clicks on one, it invokes the sfn-callback-urls API Gateway, which then sends success or failure (for the RequestApproval state) back to Step Functions using the task token embedded in the URL. Either outcome proceeds to the SendConfirmation state.",
                     "Resource": "arn:aws:states:::lambda:invoke.waitForTaskToken",
                     "Parameters": {
-                        "FunctionName": "${GlueFunction}",
+                        "FunctionName": "${SendApprovalRequestFunction}",
                         "Payload": {
-                            "step.$": "$$.State.Name",
                             "name_in_input.$": "$.name",
                             "token.$": "$$.Task.Token"
                         }
                     },
+                    "TimeoutSeconds": ${ApprovalRequestTimeoutSeconds},
                     "ResultPath": "$.output",
                     "Next": "SendConfirmation",
                     "Catch": [
@@ -86,16 +112,21 @@ Resources:
                             "ErrorEquals": [ "rejected" ],
                             "ResultPath": "$.output",
                             "Next": "SendConfirmation"
+                        },
+                        {
+                            "ErrorEquals": [ "States.Timeout" ],
+                            "ResultPath": "$.output",
+                            "Next": "SendConfirmation"
                         }
                     ]
                 },
                 "SendConfirmation": {
                     "Type": "Task",
+                    "Comment": "Use the SendConfirmationFunction lambda to send a confirmation email about the the success or failure of the approval step.",
                     "Resource": "arn:aws:states:::lambda:invoke",
                     "Parameters": {
-                        "FunctionName": "${GlueFunction}",
+                        "FunctionName": "${SendConfirmationFunction}",
                         "Payload": {
-                            "step.$": "$$.State.Name",
                             "output.$": "$.output"
                         }
                     },
@@ -104,86 +135,136 @@ Resources:
             }
         }
 
-
-  GlueFunction:
+  SendApprovalRequestFunction:
     Type: AWS::Lambda::Function
     Properties:
-      Runtime: python3.6
-      Role: !GetAtt GlueFunctionRole.Arn
+      Runtime: python3.12
+      Timeout: 10
+      Role: !GetAtt SendApprovalRequestFunctionRole.Arn
       Handler: index.lambda_handler
       Environment:
         Variables:
-          CREATE_URLS_FUNCTION_NAME: !Ref CreateUrlsFunction
+          CREATE_URLS_FUNCTION_ARN: !Ref CreateUrlsFunctionArn
           TOPIC_ARN: !Ref Topic
-      Code: 
+          TIMEOUT_SECONDS: !Ref ApprovalRequestTimeoutSeconds
+      Code:
         ZipFile: |
-          import json, os, boto3
+          import json, os, boto3, datetime, time
           def lambda_handler(event, context):
               print('Event:', json.dumps(event))
-              if event['step'] == 'SendApprovalRequest':
-                  input = {
-                      "token": event['token'],
-                      "actions": [
-                          {
-                              "name": "approve",
-                              "type": "success",
-                              "output": {
-                                  "name_in_output": event['name_in_input']
-                              }
-                          },
-                          {
-                              "name": "reject",
-                              "type": "failure",
-                              "error": "rejected",
-                              "cause": event['name_in_input'] + " rejected it"
+
+              expiration = datetime.datetime.now(datetime.UTC) + datetime.timedelta(seconds=int(os.environ['TIMEOUT_SECONDS']))
+              print('Expiration:', expiration.isoformat())
+
+              # This input creates two URLs, one for approval (causes the state to succeed) and one for failure (causes the state to fail).
+              # We embed outputs that include the name we've been provided.
+              input = {
+                  "token": event['token'],
+                  "actions": [
+                      {
+                          "name": "approve",
+                          "type": "success",
+                          "output": {
+                              "name_in_output": event['name_in_input']
                           }
-                      ]
-                  }
-                  response = boto3.client('lambda').invoke(
-                      FunctionName=os.environ['CREATE_URLS_FUNCTION_NAME'],
-                      Payload=json.dumps(input)
-                  )
-                  urls = json.loads(response['Payload'].read())['urls']
-                  print('got urls', urls)
+                      },
+                      {
+                          "name": "reject",
+                          "type": "failure",
+                          "error": "rejected",
+                          "cause": event['name_in_input'] + " rejected it"
+                      }
+                  ],
+                  "expiration": expiration.isoformat()
+              }
 
-                  email_subject = 'Step Functions example approval request'
+              # Use the sfn-callback-urls Lambda function for creating the URLs. There's also an API Gateway option.
+              t1 = time.time()
+              response = boto3.client('lambda').invoke(
+                  FunctionName=os.environ['CREATE_URLS_FUNCTION_ARN'],
+                  Payload=json.dumps(input)
+              )
+              t2 = time.time()
+              urls = json.loads(response['Payload'].read())['urls']
+              print('Got URLs:', json.dumps(urls))
+              print('Call duration:', t2-t1)
 
-                  email_body = """Hello {name},
-                  Click below (these could be better in HTML emails):
+              email_subject = 'Step Functions example approval request'
 
-                  Approve:
-                  {approve}
+              email_body = """Hello {name},
+              Click below (these could be better in HTML emails):
 
-                  Reject:
-                  {reject}
-                  """.format(
-                      name=event['name_in_input'],
-                      approve=urls['approve'],
-                      reject=urls['reject']
-                  )
-              elif event['step'] == 'SendConfirmation':
-                  email_subject = 'Step Functions example complete'
+              Approve:
+              {approve}
 
-                  if 'Error' in event['output']:
-                      email_body = """Hello,
-                      Your task was rejected: {cause}
-                      """.format(
-                          cause=event['output']['Cause']
-                      )
-                  else:
-                      email_body = """Hello {name},
-                      Your task is complete.
-                      """.format(
-                          name=event['output']['name_in_output']
-                      )
-              else:
-                  raise ValueError
+              Reject:
+              {reject}
 
-              print('sending email', email_body)
+              These links expire in {timeout} seconds.
+              """.format(
+                  name=event['name_in_input'],
+                  approve=urls['approve'],
+                  reject=urls['reject'],
+                  timeout=os.environ['TIMEOUT_SECONDS']
+              )
+
+
+              print('Sending email:\r' + email_body.replace('\n', '\r'))
+              # replacing newlines with carriage returns makes CloudWatch Logs
+              # show it as one entry of multiline text
+
               boto3.client('sns').publish(
                   TopicArn=os.environ['TOPIC_ARN'],
                   Subject=email_subject,
                   Message=email_body
               )
-              print('done')
+              print('Done')
+              return {}
+
+  SendConfirmationFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      Runtime: python3.12
+      Timeout: 10
+      Role: !GetAtt SendConfirmationFunctionRole.Arn
+      Handler: index.lambda_handler
+      Environment:
+        Variables:
+          TOPIC_ARN: !Ref Topic
+      Code:
+        ZipFile: |
+          import json, os, boto3
+          def lambda_handler(event, context):
+              print('Event:', json.dumps(event))
+
+              email_subject = 'Step Functions example complete'
+
+              if 'Error' in event['output']:
+                  if event['output']['Error'] == 'States.Timeout':
+                      email_body = """Hello,
+                      The approval request timed out.
+                      """
+                  else:
+                    email_body = """Hello,
+                    The approval was rejected: {cause}
+                    """.format(
+                        cause=event['output']['Cause']
+                    )
+              else:
+                  email_body = """Hello {name},
+                  The approval was granted.
+                  """.format(
+                      name=event['output']['name_in_output']
+                  )
+
+              print('Sending email:\r' + email_body.replace('\n', '\r'))
+              # replacing newlines with carriage returns makes CloudWatch Logs
+              # show it as one entry of multiline text
+
+              boto3.client('sns').publish(
+                  TopicArn=os.environ['TOPIC_ARN'],
+                  Subject=email_subject,
+                  Message=email_body
+              )
+              print('Done')
               return {}
