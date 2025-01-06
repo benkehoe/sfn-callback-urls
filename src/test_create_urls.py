@@ -14,9 +14,12 @@
 
 import pytest
 
-import json
+import json, os
 
 import jsonschema
+
+os.environ["ENABLE_OUTPUT_PARAMETERS"] = "false"
+os.environ["ENABLE_POST_ACTIONS"] = "false"
 
 import create_urls
 from sfn_callback_urls.schemas.action import action_schema
@@ -115,7 +118,7 @@ get_request = lambda: {
     "queryStringParameters": {
     },
     "multiValueQueryStringParameters":{
-        
+
     },
     "pathParameters": {
     },
@@ -183,16 +186,16 @@ def get_event(actions,
 
     if enable_output_parameters is not None:
         event['enable_output_parameters'] = enable_output_parameters
-    
+
     if base_url is not None:
         event['base_url'] = base_url
-    
+
     return event
 
 def test_action_schema():
     def assert_good(obj):
         jsonschema.validate(obj, action_schema)
-    
+
     def assert_bad(obj):
         with pytest.raises(jsonschema.ValidationError):
             jsonschema.validate(obj, action_schema)
@@ -223,7 +226,7 @@ def test_action_schema():
         'type': 'success',
         'output': {}
     })
-    
+
     assert_bad({
         'type': 'failure'
     })
@@ -238,7 +241,7 @@ def test_action_schema():
         'type': 'failure',
         'error': {}
     })
-    
+
     assert_good({
         'name': '1_bar',
         'type': 'failure',
@@ -250,7 +253,7 @@ def test_action_schema():
         'type': 'failure',
         'cause': {}
     })
-    
+
     assert_good({
         'name': '1_bar',
         'type': 'failure',
@@ -269,11 +272,11 @@ def test_action_schema():
 def test_event_schema():
     def assert_good(obj):
         jsonschema.validate(obj, create_urls_input_schema)
-    
+
     def assert_bad(obj):
         with pytest.raises(jsonschema.ValidationError):
             jsonschema.validate(obj, create_urls_input_schema)
-    
+
     assert_bad({})
 
     assert_bad({
@@ -353,7 +356,7 @@ def test_wrong_content_type():
 
 def test_empty_body():
     req = get_request()
-    
+
     resp = create_urls.api_handler(req, None)
 
     assert resp['statusCode'] == 400
@@ -366,7 +369,7 @@ def test_invalid_json():
     resp = create_urls.api_handler(req, None)
 
     assert resp['statusCode'] == 400
-    
+
     body = json.loads(resp['body'])
     assert body['error'] == 'InvalidJSON'
 
@@ -380,7 +383,7 @@ def test_invalid_event():
     resp = create_urls.api_handler(req, None)
 
     assert resp['statusCode'] == 400
-    
+
     body = json.loads(resp['body'])
     assert body['error'] == 'InvalidJSON'
 
@@ -405,7 +408,7 @@ def test_basic_request():
 def test_basic_event(monkeypatch):
     monkeypatch.setenv('API_ID', 'gy415nuibc')
     monkeypatch.setenv('STAGE', 'testStage')
-    
+
     event = get_event(actions=[
         get_success('foo', {'spam': 'eggs'}),
         get_failure('bar'),

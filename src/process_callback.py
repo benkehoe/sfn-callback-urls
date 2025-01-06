@@ -13,13 +13,9 @@
 # limitations under the License.
 
 import json
-import base64
 import datetime
 import os
-import uuid
-import sys
 import traceback
-from collections import namedtuple, OrderedDict
 import time
 
 import boto3
@@ -44,8 +40,6 @@ from sfn_callback_urls.post_actions import (
 )
 from sfn_callback_urls.common import (
     send_log_event,
-    get_force_disable_parameters,
-    get_disable_post_actions,
     is_verbose,
     get_header
 )
@@ -57,7 +51,7 @@ from sfn_callback_urls.exceptions import (
     ParametersDisabled,
     PostActionsDisabled,
     InvalidPostActionBody,
-    StepFunctionsError
+    StepFunctionsError,
 )
 
 BOTO3_SESSION = boto3.Session()
@@ -67,6 +61,9 @@ ENCRYPTION_CLIENT = None
 if 'KEY_ARN' in os.environ:
     KEYRING = get_keyring(BOTO3_SESSION, os.environ['KEY_ARN'])
     ENCRYPTION_CLIENT = aws_encryption_sdk.EncryptionSDKClient(commitment_policy=aws_encryption_sdk.CommitmentPolicy.REQUIRE_ENCRYPT_REQUIRE_DECRYPT)
+
+ENABLE_OUTPUT_PARAMETERS = os.environ['ENABLE_OUTPUT_PARAMETERS'] == 'true'
+ENABLE_POST_ACTIONS = os.environ['ENABLE_POST_ACTIONS'] == 'true'
 
 def handler(request, context):
     if is_verbose():
@@ -78,8 +75,10 @@ def handler(request, context):
         'timestamp': timestamp.isoformat(),
     }
 
+    transaction_id = None
+
     try:
-        response = OrderedDict() # ordered so it appears sensibly in the HTML output
+        response = {}
 
         (
             action_name_from_url,
@@ -99,8 +98,9 @@ def handler(request, context):
             print(f'Payload: {json.dumps(payload)}')
 
         # use the same transaction id given out in the create urls call
-        log_event['transaction_id'] = payload['tid']
-        response['transaction_id'] = payload['tid']
+        transaction_id = payload['tid']
+        log_event['transaction_id'] = transaction_id
+        response['transaction_id'] = transaction_id
 
         validate_payload_expiration(payload, timestamp)
 
@@ -123,17 +123,16 @@ def handler(request, context):
             'name': action_name,
             'type': action_type
         }
-        response['action'] = OrderedDict((
-            ('name', action_name),
-            ('type', action_type),
-        ))
+        response['action'] = {
+            'name': action_name,
+            'type': action_type
+        }
 
         # If parameters are disabled, refuse to service a request
         # that has parameters enabled, even though it was presumably
         # valid at creation time to have parameters enabled.
-        force_disable_parameters = get_force_disable_parameters()
         use_parameters = payload.get('param', False)
-        if use_parameters and force_disable_parameters:
+        if use_parameters and not ENABLE_OUTPUT_PARAMETERS:
             raise ParametersDisabled('Parameters are disabled')
         if not use_parameters:
             parameters = None
@@ -146,6 +145,8 @@ def handler(request, context):
         outcome_type = action_type
 
         if action_type == 'post':
+            if not ENABLE_POST_ACTIONS:
+                raise PostActionsDisabled('Post actions are disabled')
             (
                 post_outcome_name,
                 post_outcome_type,
@@ -181,13 +182,13 @@ def handler(request, context):
             # should be 400 errors.
             # Other ClientErrors, like invalid permissions, should be
             # considered 500 errors.
-            errors = [
+            errors_for_400 = [
                 'InvalidOutput',
                 'InvalidToken',
                 'TaskDoesNotExist',
                 'TaskTimedOut',
             ]
-            if error_code in errors:
+            if error_code in errors_for_400:
                 raise StepFunctionsError(f'{error_code}:{error_msg}')
             raise
 
@@ -211,10 +212,19 @@ def handler(request, context):
             print(f'Response: {json.dumps(return_value)}')
         return return_value
     except BaseError as e:
-        response = OrderedDict((
-            ('error', e.code()),
-            ('message', e.message()),
-        ))
+        # Something was invalid in the request
+        if e.EXPOSE_TO_CALLBACK_CALLER:
+            response = {}
+            if transaction_id:
+                response['transaction_id'] = transaction_id
+            response['error'] = e.code()
+            response['message'] = e.message()
+        else:
+            response = {}
+            if transaction_id:
+                response['transaction_id'] = transaction_id
+            response['error'] = 'RequestError'
+            response['message'] = 'The request was invalid.'
         log_event['error'] = {
             'type': e.TYPE,
             'error': e.code(),
@@ -228,10 +238,12 @@ def handler(request, context):
     except Exception as e:
         traceback.print_exc()
         error_class_name = type(e).__module__ + '.' + type(e).__name__
-        response = OrderedDict((
-            ('error', 'ServiceError'),
-            ('message', f'{error_class_name}: {str(e)}'),
-        ))
+        # We don't expose the details of unexpected errors to callback callers
+        response = {}
+        if transaction_id:
+            response['transaction_id'] = transaction_id
+        response['error'] = 'ServiceError'
+        response['message'] = 'An error occurred.'
         log_event['error'] = {
             'type': 'Unexpected',
             'error': error_class_name,

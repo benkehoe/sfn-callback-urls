@@ -29,8 +29,9 @@ from sfn_callback_urls.payload import (
     decode_payload, DecryptionUnsupported, EncryptionRequired,
     get_keyring
 )
-from sfn_callback_urls.common import DISABLE_PARAMETERS_ENV_VAR_NAME
 from sfn_callback_urls.exceptions import ParametersDisabled
+
+ENABLE_OUTPUT_PARAMETERS_ENV_NAME = "ENABLE_OUTPUT_PARAMETERS"
 
 PAYLOAD_SKELETON = {
     'iss': 'function name',
@@ -58,7 +59,9 @@ def test_build_basic():
         "output": {"bar": "baz"}
     }
 
-    pb = PayloadBuilder(tid, ts, token)
+    pb = PayloadBuilder(tid, ts, token,
+                        request_enable_output_parameters=False,
+                        stack_enable_output_parameters=False)
     payload = pb.build(action)
 
     assert payload['tid'] == tid
@@ -70,7 +73,7 @@ def test_build_basic():
     validate_payload_schema(payload)
 
 def test_build_exp():
-    now = datetime.datetime.now()
+    now = datetime.datetime.now(datetime.UTC)
 
     tid = uuid.uuid4().hex
     ts = now - datetime.timedelta(seconds=4)
@@ -83,7 +86,9 @@ def test_build_exp():
         "output": {"bar": "baz"}
     }
 
-    pb = PayloadBuilder(tid, ts, token, expiration=exp)
+    pb = PayloadBuilder(tid, ts, token, expiration=exp,
+                        request_enable_output_parameters=False,
+                        stack_enable_output_parameters=False)
     payload = pb.build(action)
 
     assert payload['tid'] == tid
@@ -100,7 +105,7 @@ def test_build_exp():
 
 def test_build_parameters(monkeypatch):
     tid = uuid.uuid4().hex
-    ts = datetime.datetime.now()
+    ts = datetime.datetime.now(datetime.UTC)
     token = uuid.uuid4().hex
 
     action = {
@@ -109,18 +114,18 @@ def test_build_parameters(monkeypatch):
         "output": {"bar": "baz"}
     }
 
-    pb = PayloadBuilder(tid, ts, token, enable_output_parameters=True)
+    pb_enabled = PayloadBuilder(tid, ts, token,
+                        request_enable_output_parameters=True,
+                        stack_enable_output_parameters=True)
 
-    with monkeypatch.context() as mp:
-        mp.delenv(DISABLE_PARAMETERS_ENV_VAR_NAME, raising=False)
+    payload = pb_enabled.build(action)
 
-        payload = pb.build(action)
+    pb_disabled = PayloadBuilder(tid, ts, token,
+                        request_enable_output_parameters=True,
+                        stack_enable_output_parameters=False)
 
-    with monkeypatch.context() as mp:
-        mp.setenv(DISABLE_PARAMETERS_ENV_VAR_NAME, 'true')
-
-        with pytest.raises(ParametersDisabled):
-            payload = pb.build(action)
+    with pytest.raises(ParametersDisabled):
+        payload = pb_disabled.build(action)
 
 def test_validate_payload_basic():
     payload_skeleton = {

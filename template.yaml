@@ -83,10 +83,10 @@ Conditions:
     Fn::And:
       - Fn::Equals: [ !Ref DisableEncryption, "false" ]
       - Fn::Equals: [ !Ref EncryptionKeyArn, "NONE" ]
-  OutputParametersDisabled:
-    Fn::Equals: [ !Ref EnableOutputParameters, "false" ]
-  PostActionsDisabled:
-    Fn::Equals: [ !Ref EnablePostActions, "false" ]
+  OutputParametersEnabled:
+    Fn::Equals: [ !Ref EnableOutputParameters, "true" ]
+  PostActionsEnabled:
+    Fn::Equals: [ !Ref EnablePostActions, "true" ]
   SnapStartEnabled:
     Fn::Equals: [ !Ref EnableSnapStart, "true" ]
   SnapStartNotEnabled:
@@ -280,8 +280,8 @@ Resources:
       Timeout: 5
       Environment:
         Variables:
-          DISABLE_OUTPUT_PARAMETERS: {"Fn::If": [OutputParametersDisabled, "true", "false"]}
-          DISABLE_POST_ACTIONS: {"Fn::If": [PostActionsDisabled, "true", "false"]}
+          ENABLE_OUTPUT_PARAMETERS: {"Fn::If": [OutputParametersEnabled, "true", "false"]}
+          ENABLE_POST_ACTIONS: {"Fn::If": [PostActionsEnabled, "true", "false"]}
           VERBOSE: {"Fn::If": [VerboseLoggingEnabled, "true", "false"]}
           KEY_ARN:
             "Fn::If":
@@ -312,8 +312,8 @@ Resources:
       Timeout: 5
       Environment:
         Variables:
-          DISABLE_OUTPUT_PARAMETERS: {"Fn::If": [OutputParametersDisabled, "true", "false"]}
-          DISABLE_POST_ACTIONS: {"Fn::If": [PostActionsDisabled, "true", "false"]}
+          ENABLE_OUTPUT_PARAMETERS: {"Fn::If": [OutputParametersEnabled, "true", "false"]}
+          ENABLE_POST_ACTIONS: {"Fn::If": [PostActionsEnabled, "true", "false"]}
           VERBOSE: {"Fn::If": [VerboseLoggingEnabled, "true", "false"]}
           API_ID: !Ref Api
           STAGE: !Ref ApiStage
@@ -408,8 +408,8 @@ Resources:
       Timeout: 15
       Environment:
         Variables:
-          DISABLE_OUTPUT_PARAMETERS: {"Fn::If": [OutputParametersDisabled, "true", "false"]}
-          DISABLE_POST_ACTIONS: {"Fn::If": [PostActionsDisabled, "true", "false"]}
+          ENABLE_OUTPUT_PARAMETERS: {"Fn::If": [OutputParametersEnabled, "true", "false"]}
+          ENABLE_POST_ACTIONS: {"Fn::If": [PostActionsEnabled, "true", "false"]}
           VERBOSE: {"Fn::If": [VerboseLoggingEnabled, "true", "false"]}
           KEY_ARN:
             "Fn::If":

@@ -4,7 +4,7 @@ import jsonschema
 import jsonschema.validators
 import jsonpath_rw
 
-from .common import get_header, get_disable_post_actions, is_verbose
+from .common import get_header, is_verbose
 from .callbacks import prepare_method_params
 
 from .exceptions import (
@@ -16,8 +16,6 @@ from .exceptions import (
 )
 
 def validate_post_action(action):
-    if get_disable_post_actions():
-        raise PostActionsDisabled('Post actions are disabled')
     for outcome in action['outcomes']:
         schema = outcome['schema']
         try:
@@ -138,9 +136,6 @@ def _process_post_action(action, body, parameters, log_event={}):
     )
 
 def process_post_action(action, request, parameters, log_event={}):
-    if get_disable_post_actions():
-        raise PostActionsDisabled('Post actions are disabled')
-
     body = load_post_action_body(request, log_event)
 
     if is_verbose():

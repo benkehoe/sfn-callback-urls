@@ -33,6 +33,15 @@ def assert_dicts_equal(a, b):
 
 Resources = namedtuple('Resources', ['app_stack', 'test_stack', 'state_machine_arn', 'queue'])
 
+def get_stack_parameter(stack, key):
+    for parameter in stack.parameters:
+        if parameter['ParameterKey'] == key:
+            return parameter['ParameterValue']
+    raise KeyError(f"No stack parameter named {key}")
+
+def post_actions_enabled(stack):
+    return get_stack_parameter(stack, 'EnablePostActions') == 'true'
+
 @pytest.fixture(scope='session')
 def session():
     return boto3.Session()
@@ -160,7 +169,10 @@ def create_urls_with_api(create_urls_input, resources, session, return_raw_respo
 
     creds = session.get_credentials().get_frozen_credentials()
 
-    auth = AWS4Auth(creds.access_key, creds.secret_key, session.region_name, 'execute-api', session_token=creds.token)
+    auth = AWS4Auth(
+        service='execute-api',
+        region=session.region_name,
+        refreshable_credentials=boto3.Session().get_credentials())
 
     url = f'{api_url}/urls'
     print(f'Getting URLs: {url}')
@@ -447,6 +459,8 @@ def test_call_twice(state_machine_execution, resources, session, drain):
     assert response.status_code == 400
 
 def test_post_action(state_machine_execution, resources, session, drain):
+    if not post_actions_enabled(resources.app_stack):
+        pytest.skip('Post actions not enabled')
     action_name = uuid.uuid4().hex
     schema = {
 
@@ -470,6 +484,8 @@ def test_post_action(state_machine_execution, resources, session, drain):
     assert_dicts_equal(json.loads(output.step_functions_response['output']), post_body)
 
 def test_post_action_schema_simple(state_machine_execution, resources, session, drain):
+    if not post_actions_enabled(resources.app_stack):
+        pytest.skip('Post actions not enabled')
     action_name = uuid.uuid4().hex
     schema = {
         "type": "object",
@@ -499,6 +515,8 @@ def test_post_action_schema_simple(state_machine_execution, resources, session, 
     assert_dicts_equal(json.loads(output.step_functions_response['output']), post_body)
 
 def test_post_action_schema_invalid_body(state_machine_execution, resources, session, drain):
+    if not post_actions_enabled(resources.app_stack):
+        pytest.skip('Post actions not enabled')
     action_name = uuid.uuid4().hex
     schema = {
         "type": "object",
@@ -527,9 +545,11 @@ def test_post_action_schema_invalid_body(state_machine_execution, resources, ses
     )
 
     assert output.callback_response.status_code == 400
-    assert output.callback_response.json()['error'] == 'InvalidPostActionBody'
+    assert output.callback_response.json()['error'] == 'RequestError' # opaque error to the caller
 
 def test_post_action_schema_select_1(state_machine_execution, resources, session, drain):
+    if not post_actions_enabled(resources.app_stack):
+        pytest.skip('Post actions not enabled')
     action_name = uuid.uuid4().hex
     success_schema = {
         "type": "object",
@@ -569,6 +589,8 @@ def test_post_action_schema_select_1(state_machine_execution, resources, session
     assert_dicts_equal(json.loads(output.step_functions_response['output']), post_body)
 
 def test_post_action_schema_select_2(state_machine_execution, resources, session, drain):
+    if not post_actions_enabled(resources.app_stack):
+        pytest.skip('Post actions not enabled')
     action_name = uuid.uuid4().hex
     success_schema = {
         "type": "object",
@@ -609,6 +631,8 @@ def test_post_action_schema_select_2(state_machine_execution, resources, session
     assert output.step_functions_response['status'] == 'FAILED'
 
 def test_post_action_fixed_output(state_machine_execution, resources, session, drain):
+    if not post_actions_enabled(resources.app_stack):
+        pytest.skip('Post actions not enabled')
     action_name = uuid.uuid4().hex
     schema = {
 
@@ -635,6 +659,8 @@ def test_post_action_fixed_output(state_machine_execution, resources, session, d
     assert_dicts_equal(json.loads(test_output.step_functions_response['output']), output)
 
 def test_post_action_output_path(state_machine_execution, resources, session, drain):
+    if not post_actions_enabled(resources.app_stack):
+        pytest.skip('Post actions not enabled')
     action_name = uuid.uuid4().hex
     schema = {
     }
@@ -663,6 +689,8 @@ def test_post_action_output_path(state_machine_execution, resources, session, dr
     assert_dicts_equal(json.loads(test_output.step_functions_response['output']), expected_output)
 
 def test_post_action_error_path(state_machine_execution, resources, session, drain):
+    if not post_actions_enabled(resources.app_stack):
+        pytest.skip('Post actions not enabled')
     action_name = uuid.uuid4().hex
     schema = {
     }
@@ -687,6 +715,8 @@ def test_post_action_error_path(state_machine_execution, resources, session, dra
     #TODO: validate error value
 
 def test_post_action_error_path_stringify(state_machine_execution, resources, session, drain):
+    if not post_actions_enabled(resources.app_stack):
+        pytest.skip('Post actions not enabled')
     action_name = uuid.uuid4().hex
     schema = {
     }
@@ -783,3 +813,6 @@ def test_expiration_with_z(state_machine_execution, resources, session, drain):
     )
 
     assert datetime.datetime.fromisoformat(result.create_urls_response.json()["expiration"]) == expiration.replace(tzinfo=datetime.UTC)
+
+def test_output_parameters(state_machine_execution, resources, session, drain):
+    raise NotImplementedError

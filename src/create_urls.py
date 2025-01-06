@@ -29,7 +29,7 @@ import jsonschema
 
 from sfn_callback_urls.payload import PayloadBuilder, encode_payload, get_keyring
 from sfn_callback_urls.callbacks import get_api_gateway_url, get_url
-from sfn_callback_urls.common import send_log_event, get_header, is_verbose, get_disable_post_actions
+from sfn_callback_urls.common import send_log_event, get_header, is_verbose
 from sfn_callback_urls.post_actions import validate_post_action
 
 from sfn_callback_urls.exceptions import (
@@ -50,6 +50,9 @@ ENCRYPTION_CLIENT = None
 if 'KEY_ARN' in os.environ:
     KEYRING = get_keyring(BOTO3_SESSION, os.environ['KEY_ARN'])
     ENCRYPTION_CLIENT = aws_encryption_sdk.EncryptionSDKClient(commitment_policy=aws_encryption_sdk.CommitmentPolicy.REQUIRE_ENCRYPT_REQUIRE_DECRYPT)
+
+ENABLE_OUTPUT_PARAMETERS = os.environ['ENABLE_OUTPUT_PARAMETERS'] == 'true'
+ENABLE_POST_ACTIONS = os.environ['ENABLE_POST_ACTIONS'] == 'true'
 
 DefaultApiInfo = namedtuple('DefaultApiInfo', ['region', 'api_id', 'stage'])
 
@@ -189,7 +192,8 @@ def process_event(event, context, default_api_info, response_formatter):
             response['expiration'] = expiration.isoformat()
 
         payload_builder = PayloadBuilder(transaction_id, timestamp, event['token'],
-            enable_output_parameters=event.get('enable_output_parameters'),
+            request_enable_output_parameters=event.get('enable_output_parameters'),
+            stack_enable_output_parameters=ENABLE_OUTPUT_PARAMETERS,
             expiration=expiration,
             issuer=getattr(context, 'invoked_function_arn', None)
         )
@@ -203,6 +207,8 @@ def process_event(event, context, default_api_info, response_formatter):
                 raise DuplicateActionName(f'Action {action_name} provided more than once')
 
             if action_type == 'post':
+                if not ENABLE_POST_ACTIONS:
+                    raise PostActionsDisabled('Post actions are disabled')
                 validate_post_action(action)
 
             actions_for_log[action_name] = action_type

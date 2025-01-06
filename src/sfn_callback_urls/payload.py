@@ -22,8 +22,6 @@ import aws_encryption_sdk
 import aws_cryptographic_material_providers.mpl
 import jsonschema
 
-from .common import get_force_disable_parameters
-
 from .exceptions import (
     ParametersDisabled,
     InvalidPayload,
@@ -56,13 +54,16 @@ class PayloadBuilder:
             transaction_id,
             timestamp,
             token,
-            enable_output_parameters=False,
+            *,
+            request_enable_output_parameters,
+            stack_enable_output_parameters,
             expiration=None,
             issuer=None):
         self.transaction_id = transaction_id
         self.timestamp = timestamp
         self.token = token
-        self.enable_output_parameters = enable_output_parameters
+        self.request_enable_output_parameters = request_enable_output_parameters
+        self.stack_enable_output_parameters = stack_enable_output_parameters
         self.expiration = expiration
 
         self.issuer = issuer
@@ -80,12 +81,11 @@ class PayloadBuilder:
 
         payload['action'] = action
 
-        force_disable_parameters = get_force_disable_parameters()
-        log_event['force_disable_parameters'] = force_disable_parameters
-        if self.enable_output_parameters:
+        log_event['stack_enable_output_parameters'] = self.stack_enable_output_parameters
+        if self.request_enable_output_parameters:
             if action['type'] == 'post':
                 pass # POST actions are parameterized by the POST body
-            elif force_disable_parameters:
+            elif not self.stack_enable_output_parameters:
                 log_event['enable_parameter_conflict'] = True
                 raise ParametersDisabled('Parameters are disabled')
             else:
@@ -122,9 +122,9 @@ def validate_payload_schema(payload):
         raise InvalidPayload(f'Failed schema validation ({e})')
 
 def validate_payload_expiration(payload, timestamp=None):
-    timestamp = timestamp or datetime.datetime.now()
+    timestamp = timestamp or datetime.datetime.now(datetime.UTC)
     if 'exp' in payload:
-        exp = datetime.datetime.fromtimestamp(payload['exp'])
+        exp = datetime.datetime.fromtimestamp(payload['exp'], datetime.UTC)
         if exp < timestamp:
             raise ExpiredPayload(f'Response expired on {exp.isoformat()}')
 
@@ -142,7 +142,7 @@ def decode_payload(payload, *, encryption_client, keyring):
         raise InvalidPayload(f'Base64 error ({str(e)})')
 
     if version == '1':
-        # sfn-callback-urls to make an authenticated call on behalf of an
+        # sfn-callback-urls makes an authenticated call on behalf of an
         # unauthenticated caller. With encryption turned off, the caller may pass in
         # a payload that was not created by a create_urls call by an authenticated
         # caller, and is therefore an opportunity for escalation of privileges.

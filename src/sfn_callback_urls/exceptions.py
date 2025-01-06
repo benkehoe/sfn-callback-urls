@@ -16,13 +16,14 @@ import json
 
 class BaseError(Exception):
     TYPE = 'GenericError'
-    
+    EXPOSE_TO_CALLBACK_CALLER = False # Default to generic error messages
+
     def __init__(self, message):
         self._message = message
 
     def code(self):
         return self.__class__.__name__
-    
+
     def message(self):
         return self._message
 
@@ -43,9 +44,11 @@ class OutputFormatting(RequestError):
     pass
 
 class InvalidPayload(RequestError):
+    EXPOSE_TO_CALLBACK_CALLER = True
     pass
 
 class ExpiredPayload(RequestError):
+    EXPOSE_TO_CALLBACK_CALLER = True
     pass
 
 class EncryptionFailed(RequestError):
@@ -64,9 +67,11 @@ class InvalidDate(RequestError):
     pass
 
 class ActionMismatched(RequestError):
+    EXPOSE_TO_CALLBACK_CALLER = True
     pass
 
 class PostActionsDisabled(RequestError):
+    EXPOSE_TO_CALLBACK_CALLER = True
     pass
 
 class InvalidPostActionOutcome(RequestError):
@@ -92,7 +97,7 @@ class ReturnHttpResponse(Exception):
         self.status_code = status_code
         self.headers = headers
         self.body = body
-    
+
     def get_response(self):
         body = ''
         if body is not None:
@@ -105,6 +110,6 @@ class ReturnHttpResponse(Exception):
 
     def code(self):
         return self._code
-    
+
     def message(self):
         return self._message
