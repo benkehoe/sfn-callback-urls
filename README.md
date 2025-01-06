@@ -167,6 +167,7 @@ All fields are optional, and are only used when the callback is successfully pro
 You can optionally provide an `expiration` value as an
 [ISO8601-formatted datetime](https://en.wikipedia.org/wiki/ISO_8601#Combined_date_and_time_representations);
 if a callback is made after then, it will be rejected.
+Timestamps must include a UTC offset.
 
 ### Parameterizing callbacks
 

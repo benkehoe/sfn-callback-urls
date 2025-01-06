@@ -135,7 +135,7 @@ def process_event(event, context, default_api_info, response_formatter):
                 })
 
     transaction_id = uuid.uuid4().hex
-    timestamp = datetime.datetime.now()
+    timestamp = datetime.datetime.now(datetime.UTC)
 
     log_event = {
         'transaction_id': transaction_id,
@@ -180,6 +180,8 @@ def process_event(event, context, default_api_info, response_formatter):
                 expiration = dateutil.parser.parse(event['expiration'])
             except Exception as e:
                 raise InvalidDate(f'Invalid expiration: {str(e)}')
+            if expiration.tzinfo is None:
+                raise InvalidDate(f'Expiration missing UTC offset')
             expiration_delta = (expiration - timestamp).total_seconds()
             log_event['expiration_delta'] = expiration_delta
             if expiration_delta <= 0:

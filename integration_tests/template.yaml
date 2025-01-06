@@ -22,15 +22,15 @@ Resources:
   TaskQueue:
     Type: AWS::SQS::Queue
     Properties: {}
-  
+
   StateMachineRole:
     Type: AWS::IAM::Role
     Properties:
-      AssumeRolePolicyDocument: 
+      AssumeRolePolicyDocument:
         Version: "2012-10-17"
-        Statement: 
+        Statement:
           - Effect: "Allow"
-            Principal: 
+            Principal:
               Service: "states.amazonaws.com"
             Action: "sts:AssumeRole"
       Policies:
@@ -41,7 +41,7 @@ Resources:
               - Effect: Allow
                 Action: sqs:SendMessage
                 Resource: !GetAtt TaskQueue.Arn
-  
+
   StateMachine:
     Type: AWS::StepFunctions::StateMachine
     Properties:

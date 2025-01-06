@@ -14,6 +14,20 @@
 
 Transform: 'AWS::Serverless-2016-10-31'
 Metadata:
+  AWS::ServerlessRepo::Application:
+    Name: sfn-callback-urls
+    SemanticVersion: 2.0.0
+    Description: Easy handling of Step Function tokens as callback URLs
+    Author: Ben Kehoe
+    Labels:
+      - stepfunctions
+      - callback
+      - email
+    SpdxLicenseId: Apache-2.0
+    LicenseUrl: LICENSE
+    ReadmeUrl: README.md
+    HomePageUrl: https://github.com/benkehoe/sfn-callback-urls
+    SourceCodeUrl: https://github.com/benkehoe/sfn-callback-urls
   cfn-lint:
     config:
       ignore_checks:
@@ -21,6 +35,7 @@ Metadata:
 Globals:
   Function:
     Runtime: python3.12
+    MemorySize: 1024
 Parameters:
   DisableEncryption:
     Description: Disable encryption for callback payloads
@@ -47,6 +62,13 @@ Parameters:
       - "true"
       - "false"
     Default: "false"
+  EnableSnapStart:
+    Description: Use Lambda SnapStart to reduce cold start time
+    Type: String
+    AllowedValues:
+      - "true"
+      - "false"
+    Default: "false"
   VerboseLogging:
     Description: Log requests and payloads
     Type: String
@@ -65,13 +87,17 @@ Conditions:
     Fn::Equals: [ !Ref EnableOutputParameters, "false" ]
   PostActionsDisabled:
     Fn::Equals: [ !Ref EnablePostActions, "false" ]
+  SnapStartEnabled:
+    Fn::Equals: [ !Ref EnableSnapStart, "true" ]
+  SnapStartNotEnabled:
+    !Not [ !Condition SnapStartEnabled ]
   VerboseLoggingEnabled:
     Fn::Equals: [ !Ref VerboseLogging, "true" ]
 Outputs:
   Api:
     Value: !Sub "https://${Api}.execute-api.${AWS::Region}.amazonaws.com/${ApiStage}"
   Function:
-    Value: !Ref CreateUrls
+    Value: !Ref CreateUrlsFunctionAlias
   Policy:
     Value: !Ref CreateUrlsPolicy
 Resources:
@@ -87,7 +113,10 @@ Resources:
             Resource: !Sub arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${Api}/${ApiStage}/*
           - Effect: Allow
             Action: lambda:Invoke
-            Resource: !GetAtt CreateUrls.Arn
+            Resource: !GetAtt CreateUrlsFunction.Arn
+          - Effect: Allow
+            Action: lambda:Invoke
+            Resource: !Ref CreateUrlsFunctionAlias
 
   Api:
     Type: AWS::ApiGateway::RestApi
@@ -114,14 +143,28 @@ Resources:
       Integration:
         Type: AWS_PROXY
         IntegrationHttpMethod: POST
-        Uri: !Sub "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:${CreateUrlsForApi}/invocations"
+        Uri:
+          !Join
+            - ""
+            - - !Sub "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/"
+              - !If
+                - SnapStartEnabled
+                - !Ref CreateUrlsForApiFunctionVersion
+                - !GetAtt CreateUrlsForApiFunction.Arn
+              - "/invocations"
 
   CreateUrlsInvokePermission:
     Type: AWS::Lambda::Permission
     Properties:
-      FunctionName: !Ref CreateUrlsForApi
+      FunctionName:
+        !If
+          - SnapStartEnabled
+          - !Ref CreateUrlsForApiFunctionVersion
+          - !GetAtt CreateUrlsForApiFunction.Arn
       Action: "lambda:InvokeFunction"
       Principal: apigateway.amazonaws.com
+      SourceAccount: !Ref AWS::AccountId
+      SourceArn: !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${Api}/*/*/*"
 
   ProcessCallbackResource:
     Type: AWS::ApiGateway::Resource
@@ -140,7 +183,15 @@ Resources:
       Integration:
         Type: AWS_PROXY
         IntegrationHttpMethod: POST
-        Uri: !Sub "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:${ProcessCallbackFunction}/invocations"
+        Uri:
+          !Join
+            - ""
+            - - !Sub "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/"
+              - !If
+                - SnapStartEnabled
+                - !Ref ProcessCallbackFunctionVersion
+                - !GetAtt ProcessCallbackFunction.Arn
+              - "/invocations"
 
   ProcessCallbackPostMethod:
     Type: AWS::ApiGateway::Method
@@ -152,14 +203,28 @@ Resources:
       Integration:
         Type: AWS_PROXY
         IntegrationHttpMethod: POST
-        Uri: !Sub "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:${ProcessCallbackFunction}/invocations"
+        Uri: # !Sub "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:${ProcessCallbackFunction}/invocations"
+          !Join
+            - ""
+            - - !Sub "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/"
+              - !If
+                - SnapStartEnabled
+                - !Ref ProcessCallbackFunctionVersion
+                - !GetAtt ProcessCallbackFunction.Arn
+              - "/invocations"
 
   ProcessCallbackInvokePermission:
     Type: AWS::Lambda::Permission
     Properties:
-      FunctionName: !Ref ProcessCallbackFunction
+      FunctionName:
+        !If
+          - SnapStartEnabled
+          - !Ref ProcessCallbackFunctionVersion
+          - !GetAtt ProcessCallbackFunction.Arn
       Action: "lambda:InvokeFunction"
       Principal: apigateway.amazonaws.com
+      SourceAccount: !Ref AWS::AccountId
+      SourceArn: !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${Api}/*/*/*"
 
   CreateUrlsRole:
     Type: AWS::IAM::Role
@@ -192,22 +257,27 @@ Resources:
               - "logs:CreateLogStream"
               - "logs:CreateLogGroup"
             Resource:
-              - !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/${CreateUrls}:*"
-              - !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/${CreateUrlsForApi}:*"
+              - !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/${CreateUrlsFunction}:*"
+              - !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/${CreateUrlsForApiFunction}:*"
           - Effect: Allow
             Action:
               - "logs:PutLogEvents"
             Resource:
-              - !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/${CreateUrls}:log-stream:*"
-              - !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/${CreateUrlsForApi}:log-stream:*"
+              - !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/${CreateUrlsFunction}:log-stream:*"
+              - !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/${CreateUrlsForApiFunction}:log-stream:*"
 
-  CreateUrlsForApi:
+  CreateUrlsForApiFunction:
     Type: 'AWS::Serverless::Function'
     Properties:
       CodeUri: ./src
       Handler: create_urls.api_handler
       Role: !GetAtt CreateUrlsRole.Arn
-      MemorySize: 1024
+      SnapStart:
+        "Fn::If":
+        - SnapStartEnabled
+        - "ApplyOn": "PublishedVersions"
+        - !Ref "AWS::NoValue"
+      Timeout: 5
       Environment:
         Variables:
           DISABLE_OUTPUT_PARAMETERS: {"Fn::If": [OutputParametersDisabled, "true", "false"]}
@@ -222,13 +292,24 @@ Resources:
                   - !Ref EncryptionKeyArn
               - !Ref AWS::NoValue
 
-  CreateUrls:
+  CreateUrlsForApiFunctionVersion:
+    Type: AWS::Lambda::Version
+    Condition: SnapStartEnabled
+    Properties:
+      FunctionName: !Ref CreateUrlsForApiFunction
+
+  CreateUrlsFunction:
     Type: 'AWS::Serverless::Function'
     Properties:
       CodeUri: ./src
       Handler: create_urls.direct_handler
       Role: !GetAtt CreateUrlsRole.Arn
-      MemorySize: 1024
+      SnapStart:
+        "Fn::If":
+        - SnapStartEnabled
+        - "ApplyOn": "PublishedVersions"
+        - !Ref "AWS::NoValue"
+      Timeout: 5
       Environment:
         Variables:
           DISABLE_OUTPUT_PARAMETERS: {"Fn::If": [OutputParametersDisabled, "true", "false"]}
@@ -244,6 +325,22 @@ Resources:
                   - !GetAtt EncryptionKey.Arn
                   - !Ref EncryptionKeyArn
               - !Ref AWS::NoValue
+
+  CreateUrlsFunctionVersion:
+    Type: AWS::Lambda::Version
+    Condition: SnapStartEnabled
+    Properties:
+      FunctionName: !Ref CreateUrlsFunction
+
+  CreateUrlsFunctionAlias:
+    Type: AWS::Lambda::Alias
+    Properties:
+      Name: live
+      FunctionName: !Ref CreateUrlsFunction
+      FunctionVersion: !If
+        - SnapStartEnabled
+        - !GetAtt CreateUrlsFunctionVersion.Version
+        - "$LATEST"
 
   ProcessCallbackRole:
     Type: AWS::IAM::Role
@@ -303,7 +400,11 @@ Resources:
       CodeUri: ./src
       Handler: process_callback.handler
       Role: !GetAtt ProcessCallbackRole.Arn
-      MemorySize: 1024
+      SnapStart:
+        "Fn::If":
+        - SnapStartEnabled
+        - "ApplyOn": "PublishedVersions"
+        - !Ref "AWS::NoValue"
       Timeout: 15
       Environment:
         Variables:
@@ -319,8 +420,28 @@ Resources:
                   - !Ref EncryptionKeyArn
               - !Ref AWS::NoValue
 
-  ApiDeployment:
+  ProcessCallbackFunctionVersion:
+    Type: AWS::Lambda::Version
+    Condition: SnapStartEnabled
+    Properties:
+      FunctionName: !Ref ProcessCallbackFunction
+
+  # The following nonsense ensures the API stage gets the updated deployment
+  # when the SnapStart option is toggled
+
+  ApiDeployment1:
     Type: AWS::ApiGateway::Deployment
+    Condition: SnapStartEnabled
+    DependsOn:
+      - CreateUrlsMethod
+      - ProcessCallbackGetMethod
+      - ProcessCallbackPostMethod
+    Properties:
+      RestApiId: !Ref Api
+
+  ApiDeployment2:
+    Type: AWS::ApiGateway::Deployment
+    Condition: SnapStartNotEnabled
     DependsOn:
       - CreateUrlsMethod
       - ProcessCallbackGetMethod
@@ -333,7 +454,11 @@ Resources:
     Properties:
       RestApiId: !Ref Api
       StageName: v1
-      DeploymentId: !Ref ApiDeployment
+      DeploymentId:
+        !If
+          - SnapStartEnabled
+          - !Ref ApiDeployment1
+          - !Ref ApiDeployment2
 
   EncryptionKey:
     Type: AWS::KMS::Key

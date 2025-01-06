@@ -19,6 +19,8 @@ import uuid
 import json
 import time
 import os
+import datetime
+import re
 from collections import namedtuple
 
 import boto3
@@ -217,7 +219,10 @@ def _run_test(
         'actions': actions,
     }
     if expiration is not None:
-        create_urls_input['expiration'] = expiration.isoformat()
+        if isinstance(expiration, datetime.datetime):
+            create_urls_input['expiration'] = expiration.isoformat()
+        else:
+            create_urls_input['expiration'] = expiration
     if enable_output_parameters is not None:
         create_urls_input['enable_output_parameters'] = enable_output_parameters
 
@@ -708,3 +713,73 @@ def test_post_action_error_path_stringify(state_machine_execution, resources, se
     ])
 
     #TODO: validate error value
+
+def test_expiration_no_offset(state_machine_execution, resources, session, drain):
+    action_name = uuid.uuid4().hex
+    task_output = {"cid_out": state_machine_execution.correlation_id}
+    actions = [
+        Actions.success(action_name, task_output)
+    ]
+
+    expiration = datetime.datetime.now() + datetime.timedelta(minutes=5)
+    expiration_str = expiration.isoformat()
+
+    assert not re.search("[-+][0-9]{2}:[0-9]{2}$", expiration_str)
+
+    result = _run_test(
+        state_machine_execution, resources, session,
+        actions=actions,
+        expiration=expiration_str,
+        end_after='create_urls',
+        return_raw_create_urls_response=True,
+    )
+
+    assert result.create_urls_response.status_code == 400
+    assert result.create_urls_response.json()['error'] == 'InvalidDate'
+
+
+def test_expiration_with_offset(state_machine_execution, resources, session, drain):
+    action_name = uuid.uuid4().hex
+    task_output = {"cid_out": state_machine_execution.correlation_id}
+    actions = [
+        Actions.success(action_name, task_output)
+    ]
+
+    expiration = datetime.datetime.now(datetime.UTC) + datetime.timedelta(minutes=5)
+    expiration_str = expiration.isoformat()
+
+    assert re.search("[-+][0-9]{2}:[0-9]{2}$", expiration_str)
+
+    result = _run_test(
+        state_machine_execution, resources, session,
+        actions=actions,
+        expiration=expiration_str,
+        end_after='create_urls',
+        return_raw_create_urls_response=True,
+    )
+
+    assert datetime.datetime.fromisoformat(result.create_urls_response.json()["expiration"]) == expiration
+
+def test_expiration_with_z(state_machine_execution, resources, session, drain):
+    action_name = uuid.uuid4().hex
+    task_output = {"cid_out": state_machine_execution.correlation_id}
+    actions = [
+        Actions.success(action_name, task_output)
+    ]
+
+    expiration = datetime.datetime.now() + datetime.timedelta(minutes=5)
+    expiration_str = expiration.isoformat()
+
+    assert not re.search("[-+][0-9]{2}:[0-9]{2}$", expiration_str)
+
+    expiration_str = expiration_str + "Z"
+
+    result = _run_test(
+        state_machine_execution, resources, session,
+        actions=actions,
+        expiration=expiration_str,
+        end_after='create_urls',
+        return_raw_create_urls_response=True,
+    )
+
+    assert datetime.datetime.fromisoformat(result.create_urls_response.json()["expiration"]) == expiration.replace(tzinfo=datetime.UTC)

@@ -46,7 +46,7 @@ def send_log_event(log_event: dict):
 def get_header(request: dict, name: str):
     """Get a header from the request payload sent by API Gateway proxy integration to Lambda.
     Does not deal with multi-value headers, but that's fine for this app"""
-    for key in request['headers']:
+    for key in (request['headers'] or []):
         if key.lower() == name.lower():
             return request['headers'][key]
     return None
